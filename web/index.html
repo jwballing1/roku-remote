@@ -1,0 +1,1658 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14151a">
+<title>TV Remote</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14151a;
+    --panel: #1e2027;
+    --key: #2b2e38;
+    --key-active: #41465a;
+    --line: #363a47;
+    --text: #f2f3f7;
+    --muted: #a3a8b8;
+    --accent: #8f7bff;
+    --accent-ink: #14112b;
+    --on: #4ade80;
+    --off: #f59e0b;
+    --down: #f87171;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 12px 16px 32px; }
+  header { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; }
+  .tv-title { flex: 1; min-width: 0; }
+  .tv-title h1 { margin: 0; font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .state { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--on); }
+  .dot.standby { background: var(--off); }
+  .dot.down { background: var(--down); }
+
+  .text-btn { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+  .text-btn:hover { background: var(--panel); }
+  .primary { background: var(--accent); border: 0; border-radius: 8px; padding: 10px 16px; color: var(--accent-ink); font-weight: 600; }
+  .primary:disabled { opacity: .6; cursor: default; }
+
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 760px) { .layout { grid-template-columns: 340px minmax(0, 1fr); align-items: start; } }
+
+  .panel { background: var(--panel); border-radius: 16px; padding: 16px; }
+  .panel + .panel { margin-top: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--muted); }
+
+  .key {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 52px; background: var(--key); border: 0; border-radius: 12px; font-size: 14px;
+    transition: background .08s;
+  }
+  .key:hover { background: #343845; }
+  .key:active, .key.pressed { background: var(--key-active); }
+  .row { display: grid; gap: 8px; margin-top: 8px; }
+  .row:first-child { margin-top: 0; }
+  .cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .power-on { color: var(--on); }
+  .power-off { color: var(--down); }
+
+  .dpad {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+    width: min(100%, 260px); margin: 16px auto; aspect-ratio: 1;
+  }
+  .dpad .key { min-height: 0; }
+  .dpad .up { grid-area: 1 / 2; border-radius: 16px 16px 8px 8px; }
+  .dpad .left { grid-area: 2 / 1; border-radius: 16px 8px 8px 16px; }
+  .dpad .ok { grid-area: 2 / 2; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 16px; }
+  .dpad .ok:hover, .dpad .ok:active, .dpad .ok.pressed { background: #a797ff; }
+  .dpad .right { grid-area: 2 / 3; border-radius: 8px 16px 16px 8px; }
+  .dpad .down { grid-area: 3 / 2; border-radius: 8px 8px 16px 16px; }
+
+  .type-row { display: flex; gap: 8px; }
+  .field { flex: 1; width: 100%; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .type-row .key { min-height: 44px; padding: 0 12px; }
+
+  .apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+  .app { position: relative; padding: 0; background: var(--key); border: 0; border-radius: 10px; overflow: hidden; aspect-ratio: 3 / 2; }
+  .app img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .app span { display: flex; align-items: center; justify-content: center; height: 100%; padding: 6px; font-size: 13px; }
+  .app:hover { filter: brightness(1.15); }
+  .app.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+  .inputs .key { min-height: 44px; }
+
+  .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+  .panel-head h2 { margin: 0; }
+  .link { background: none; border: 0; padding: 4px 8px; color: var(--accent); font-size: 14px; }
+  .channel { min-height: 68px; padding: 8px; background: var(--key); border: 0; border-radius: 10px; text-align: center; overflow-wrap: anywhere; }
+  button.channel:hover { background: #343845; }
+  button.channel:active { background: var(--key-active); }
+  .channel strong { display: block; font-weight: 600; font-size: 15px; }
+  .channel small { display: block; color: var(--muted); font-size: 12px; }
+  .channel.add { background: none; border: 1px dashed var(--line); color: var(--muted); font-size: 14px; }
+  .tv-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tvs-edit-note { margin: 0 0 12px; }
+  .tv-tabs .tv-remove { display: grid; gap: 6px; flex: 1 1 110px; padding: 8px; background: var(--key); border-radius: 10px; text-align: center; font-weight: 600; }
+  .tv-tabs .tv-remove button { min-height: 36px; padding: 4px 8px; background: var(--bg); color: var(--down); font-weight: 400; font-size: 14px; border-radius: 6px; flex: none; }
+  .tv-tabs button { flex: 1 1 110px; min-height: 44px; padding: 8px 12px; background: var(--key); border: 1px solid transparent; border-radius: 10px; font-weight: 600; overflow-wrap: anywhere; }
+  .tv-tabs button:hover { background: #343845; }
+  .tv-tabs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .is-busy .tv-tabs { opacity: .5; pointer-events: none; }
+  .head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+  .settings-section summary { display: flex; align-items: center; justify-content: space-between; min-height: 32px; cursor: pointer; list-style: none; }
+  .settings-section summary::-webkit-details-marker { display: none; }
+  .settings-section summary h2 { margin: 0; }
+  .settings-section summary::after { content: ""; width: 8px; height: 8px; margin-right: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); }
+  .settings-section[open] summary::after { transform: rotate(225deg); }
+  .settings-section[open] summary { margin-bottom: 12px; }
+  .settings-actions { margin-top: 12px; }
+  .settings-block { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .settings-block h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+  .settings-block .type-row, #lock-open { margin-top: 10px; }
+  .settings-block a { color: var(--accent); }
+  .alerts-form { display: grid; gap: 10px; margin-top: 10px; }
+  #alert-server-fields { margin-top: 0; }
+  .alerts-form label { margin: 0; color: var(--muted); }
+  .alerts-form .field { display: block; margin-top: 4px; resize: vertical; }
+  .start-over { font-weight: 600; }
+  .unlock-area { display: none; margin-top: 24px; text-align: center; }
+  body.locked .unlock-area { display: block; }
+  body.locked .hide-locked { display: none !important; }
+  body.locked #channels .add { display: none; }
+  body.locked #channels, body.locked #shortcuts { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  body.locked #channels .channel, body.locked #shortcuts .channel { min-height: 112px; }
+  body.locked .channel strong { font-size: 20px; }
+  body.locked .channel small { font-size: 14px; }
+  body.locked .tv-tabs button { font-size: 18px; min-height: 56px; }
+  body.locked .only-keys .key { min-height: 60px; font-size: 16px; }
+  a.key { color: inherit; text-decoration: none; text-align: center; }
+  .only-keys { display: none; margin: 0 0 14px; }
+  body.channels-only .only-keys { display: grid; }
+  body.channels-only:not(.is-recording) .hide-channels-only { display: none; }
+  body.channels-only:not(.is-recording) .layout { grid-template-columns: minmax(0, 1fr); }
+  body.channels-only #channels, body.channels-only #shortcuts { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  body.channels-only #channels .channel, body.channels-only #shortcuts .channel { min-height: 96px; }
+  .channel.dragging { opacity: .55; outline: 2px solid var(--accent); }
+  .drag-handle { width: 100%; margin-bottom: 6px; padding: 8px 4px; background: var(--bg); border: 0; border-radius: 6px; color: var(--muted); font-size: 12px; cursor: grab; touch-action: none; }
+  .channel-actions { display: grid; gap: 4px; margin-top: 6px; }
+  .channel-actions button { background: var(--bg); border: 0; border-radius: 6px; padding: 6px; font-size: 13px; }
+  .channel-actions .danger { color: var(--down); }
+  .is-busy #channels, .is-busy #shortcuts { opacity: .5; pointer-events: none; }
+  .shortcuts-group { margin-bottom: 16px; }
+  .only-keys + .shortcuts-group { margin-top: 0; }
+  .shortcuts-group h2 { margin-bottom: 12px; }
+  .tv-picker { display: grid; gap: 8px; text-align: left; padding: 4px; }
+  .tv-picker label { margin: 0; display: flex; align-items: center; gap: 8px; min-height: 32px; }
+  .tv-picker input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+  #add-channel { margin-top: 12px; display: grid; gap: 8px; }
+  #add-channel label { margin: 0; color: var(--muted); }
+  #add-channel .field { display: block; margin-top: 4px; }
+  .form-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  #add-channel h3 { margin: 8px 0 0; font-size: 14px; font-weight: 600; }
+  .delay-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; }
+  .gap-all { justify-self: start; padding-left: 0; }
+  .field-label { display: block; margin-bottom: 4px; font-size: 14px; color: var(--muted); }
+  .tv-select summary { display: block; cursor: pointer; list-style: none; position: relative; padding-right: 32px; }
+  .tv-select summary::-webkit-details-marker { display: none; }
+  .tv-select summary::after { content: ""; position: absolute; right: 14px; top: 50%; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-70%) rotate(45deg); }
+  .tv-select[open] summary::after { transform: translateY(-30%) rotate(225deg); }
+  .tv-select-menu { margin-top: 4px; padding: 6px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+  #add-channel .tv-select-menu label { display: flex; align-items: center; gap: 10px; min-height: 40px; margin: 0; color: var(--text); }
+  .tv-select-menu input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+  .tv-select-menu .all-option { border-bottom: 1px solid var(--line); }
+  #add-channel .check-row { display: flex; align-items: flex-start; gap: 10px; color: var(--text); }
+  .check-row input { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); }
+  .check-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .step { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg); border-radius: 8px; font-size: 14px; }
+  .step .wait { color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  .step input { width: 62px; padding: 5px 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  .step strong { flex: 1 1 60px; font-weight: 600; overflow-wrap: anywhere; }
+  .step-actions { display: flex; gap: 6px; margin-left: auto; }
+  .step button { width: 32px; height: 32px; padding: 0; background: var(--key); border: 0; border-radius: 6px; line-height: 1; }
+  .step button svg { width: 16px; height: 16px; margin: auto; }
+  .step button:disabled { opacity: .35; cursor: default; }
+  .palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .palette .key { min-height: 44px; }
+  .palette .ok-add { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+  #banner {
+    position: sticky; top: 8px; z-index: 5; margin-bottom: 12px; padding: 12px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+    background: #2b2552; border: 1px solid var(--accent); border-radius: 12px;
+  }
+  #banner-text { flex: 1 1 200px; min-width: 0; }
+  #banner-text strong { display: block; }
+  #banner-text span { display: block; font-size: 13px; color: #d4cfff; overflow-wrap: anywhere; }
+  .banner-buttons { display: flex; gap: 8px; }
+  .is-recording .hide-recording { display: none; }
+  .is-recording .no-record { opacity: .3; pointer-events: none; }
+
+  .muted { color: var(--muted); font-size: 14px; margin: 0; }
+  .shortcuts { display: none; }
+  @media (hover: hover) and (min-width: 760px) { .shortcuts { display: block; } }
+  kbd { background: var(--key); border-radius: 4px; padding: 1px 5px; font: inherit; font-size: 12px; }
+
+  .setup { max-width: 480px; margin: 24px auto; }
+  .setup h2 { font-size: 20px; color: var(--text); margin-bottom: 4px; }
+  .found { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 8px; }
+  .found button { width: 100%; text-align: left; background: var(--key); border: 0; border-radius: 10px; padding: 12px 14px; }
+  .found button:hover { background: var(--key-active); }
+  .found small { display: block; color: var(--muted); }
+  .manual { display: flex; gap: 8px; margin-top: 8px; }
+  label { display: block; font-size: 14px; margin-top: 20px; }
+
+  #toast {
+    position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
+    max-width: 480px; margin: 0 auto; padding: 12px 14px; border-radius: 10px;
+    background: #3b1d22; border: 1px solid #7a2f38; font-size: 14px;
+  }
+  #toast.info { background: var(--panel); border-color: var(--line); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9M6.3 7.3a8 8 0 1 0 11.4 0"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M6 9.5V21h12V9.5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M9 6L3 12l6 6M3 12h18"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-replay" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 8v8M8 10l8 4M16 10l-8 4"/></symbol>
+  <symbol id="i-rev" viewBox="0 0 24 24"><path d="M11 6l-7 6 7 6zM20 6l-7 6 7 6z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M4 5l9 7-9 7zM16 5v14M20 5v14"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M4 6l7 6-7 6zM13 6l7 6-7 6z"/></symbol>
+  <symbol id="i-vol-down" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9zM17 12h4"/></symbol>
+  <symbol id="i-vol-up" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9zM16 12h5M18.5 9.5v5"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9zM17 10l4 4M21 10l-4 4"/></symbol>
+</svg>
+
+<div class="wrap">
+  <section id="setup" class="panel setup" hidden>
+    <h2>Connect to your TV</h2>
+    <p class="muted">Your TV needs to be on, and on the same network as this computer.</p>
+    <p id="scan-status" class="muted" style="margin-top:16px" role="status"></p>
+    <ul id="found" class="found"></ul>
+    <button id="scan" class="text-btn" type="button">Search again</button>
+    <form id="manual">
+      <label for="manual-ip">Or enter its IP address (Settings &gt; Network &gt; About)</label>
+      <div class="manual">
+        <input id="manual-ip" class="field" inputmode="decimal" placeholder="192.168.1.50" autocomplete="off" required>
+        <button class="primary" id="manual-go">Connect</button>
+      </div>
+    </form>
+    <button id="cancel-setup" class="text-btn" type="button" style="margin-top:16px" hidden>Back to remote</button>
+  </section>
+
+  <div id="remote" hidden>
+    <header>
+      <div class="tv-title">
+        <h1 id="tv-name">TV</h1>
+        <div class="state"><span id="dot" class="dot"></span><span id="state-text" role="status">Checking…</span></div>
+      </div>
+      <button id="change-tv" class="text-btn hide-recording hide-locked" type="button">Change TV</button>
+    </header>
+
+    <div id="banner" hidden>
+      <div id="banner-text" role="status"><strong id="banner-title"></strong><span id="banner-detail"></span></div>
+      <div class="banner-buttons">
+        <button id="banner-save" class="primary" type="button" hidden>Save</button>
+        <button id="banner-cancel" class="text-btn" type="button">Cancel</button>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="hide-channels-only">
+        <div class="panel">
+          <div class="row cols-2">
+            <button class="key power-on" id="power-on" type="button"><svg><use href="#i-power"/></svg>Turn on</button>
+            <button class="key power-off" data-key="PowerOff" type="button"><svg><use href="#i-power"/></svg>Turn off</button>
+          </div>
+          <div class="row cols-2">
+            <button class="key" data-key="Back" type="button"><svg><use href="#i-back"/></svg>Back</button>
+            <button class="key" data-key="Home" type="button"><svg><use href="#i-home"/></svg>Home</button>
+          </div>
+          <div class="dpad">
+            <button class="key up" data-key="Up" data-repeat aria-label="Up" type="button"><svg><use href="#i-up"/></svg></button>
+            <button class="key left" data-key="Left" data-repeat aria-label="Left" type="button"><svg><use href="#i-left"/></svg></button>
+            <button class="key ok" data-key="Select" type="button">OK</button>
+            <button class="key right" data-key="Right" data-repeat aria-label="Right" type="button"><svg><use href="#i-right"/></svg></button>
+            <button class="key down" data-key="Down" data-repeat aria-label="Down" type="button"><svg><use href="#i-down"/></svg></button>
+          </div>
+          <div class="row cols-2">
+            <button class="key" data-key="InstantReplay" type="button"><svg><use href="#i-replay"/></svg>Replay</button>
+            <button class="key" data-key="Info" type="button"><svg><use href="#i-star"/></svg>Options</button>
+          </div>
+          <div class="row cols-3">
+            <button class="key" data-key="Rev" aria-label="Rewind" type="button"><svg><use href="#i-rev"/></svg></button>
+            <button class="key" data-key="Play" aria-label="Play or pause" type="button"><svg><use href="#i-play"/></svg></button>
+            <button class="key" data-key="Fwd" aria-label="Fast forward" type="button"><svg><use href="#i-fwd"/></svg></button>
+          </div>
+          <div class="row cols-3">
+            <button class="key" data-key="VolumeDown" data-repeat aria-label="Volume down" type="button"><svg><use href="#i-vol-down"/></svg></button>
+            <button class="key" data-key="VolumeMute" aria-label="Mute" type="button"><svg><use href="#i-mute"/></svg></button>
+            <button class="key" data-key="VolumeUp" data-repeat aria-label="Volume up" type="button"><svg><use href="#i-vol-up"/></svg></button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel hide-recording" id="tvs-panel" hidden>
+          <div class="panel-head">
+            <h2>TVs</h2>
+            <div class="head-actions hide-channels-only">
+              <button id="add-tv" class="link" type="button" hidden>+ Add a TV</button>
+              <button id="tvs-edit" class="link" type="button">Edit</button>
+            </div>
+          </div>
+          <p id="tvs-edit-note" class="muted tvs-edit-note" hidden>Removing a TV deletes its channels and app choices here. Searches won't add it back, but you can add it again with + Add a TV.</p>
+          <div id="tv-tabs" class="tv-tabs" role="group" aria-label="Choose a TV"></div>
+        </div>
+        <div class="panel hide-recording">
+          <div class="row cols-3 only-keys">
+            <button class="key" data-key="Back" type="button"><svg><use href="#i-back"/></svg>Back</button>
+            <button class="key" data-key="Home" type="button"><svg><use href="#i-home"/></svg>Home</button>
+            <button class="key start-over" type="button">Start over</button>
+          </div>
+          <div id="shortcuts-group" class="shortcuts-group" hidden>
+            <h2>Shortcuts</h2>
+            <div id="shortcuts" class="apps"></div>
+          </div>
+          <div class="panel-head">
+            <h2>Channels</h2>
+            <div class="head-actions hide-locked">
+              <button id="channels-only" class="link" type="button" aria-pressed="false">Show only channels</button>
+              <button id="channels-edit" class="link" type="button" hidden>Edit</button>
+            </div>
+          </div>
+          <div id="channels" class="apps"></div>
+          <form id="add-channel" hidden>
+            <label>Channel name
+              <input id="channel-name" class="field" maxlength="40" placeholder="MeTV" autocomplete="off" required>
+            </label>
+            <label>App it's in
+              <select id="channel-app" class="field" required></select>
+            </label>
+            <div id="tv-select-row">
+              <span class="field-label" id="tv-select-label">TVs</span>
+              <details id="tv-select" class="tv-select" aria-labelledby="tv-select-label">
+                <summary id="tv-select-summary" class="field">All TVs</summary>
+                <div id="tv-select-menu" class="tv-select-menu"></div>
+              </details>
+            </div>
+            <div class="delay-row">
+              <label>Wait for app to open (seconds)
+                <input id="open-delay" class="field" type="number" min="0" max="120" step="any" value="8" required>
+              </label>
+              <label>Delay between presses (seconds)
+                <input id="step-gap" class="field" type="number" min="0.3" max="60" step="any" value="1" required>
+              </label>
+            </div>
+            <button id="gap-all" class="link gap-all" type="button">Use this delay for every press</button>
+            <label class="check-row">
+              <input id="is-shortcut" type="checkbox">
+              <span>This isn't a channel
+                <small>Puts this button under Shortcuts, above the channels. Use it for things like a guide or menu.</small>
+              </span>
+            </label>
+            <label class="check-row">
+              <input id="expect-video" type="checkbox" checked>
+              <span>Check that video starts
+                <small>Warns the viewer and emails alerts if nothing plays. Turn this off for channels that just open a menu, like a guide.</small>
+              </span>
+            </label>
+            <label class="check-row">
+              <input id="reset-first" type="checkbox">
+              <span>Start from the app's home screen
+                <small>Clears where the app was left, so the presses always start from its top menu. Works with Frndly TV. Other apps may not support it, so test first.</small>
+              </span>
+            </label>
+
+            <h3>Button presses</h3>
+            <ol id="steps" class="steps"></ol>
+            <p id="steps-empty" class="muted">None yet. Tap the buttons below to add them. Nothing is sent to the TV while you do this.</p>
+            <div class="palette">
+              <button class="key" data-add="Up" type="button" aria-label="Add Up"><svg><use href="#i-up"/></svg></button>
+              <button class="key" data-add="Down" type="button" aria-label="Add Down"><svg><use href="#i-down"/></svg></button>
+              <button class="key" data-add="Left" type="button" aria-label="Add Left"><svg><use href="#i-left"/></svg></button>
+              <button class="key" data-add="Right" type="button" aria-label="Add Right"><svg><use href="#i-right"/></svg></button>
+              <button class="key ok-add" data-add="Select" type="button" aria-label="Add OK">OK</button>
+              <button class="key" data-add="Back" type="button">Back</button>
+              <button class="key" data-add="Play" type="button">Play</button>
+              <button class="key" data-add="Info" type="button">Options</button>
+            </div>
+            <div class="type-row">
+              <input id="step-text" class="field" placeholder="Letters to type, like metv" aria-label="Letters to type" autocomplete="off" autocapitalize="off">
+              <button id="step-text-add" class="key" type="button">Add</button>
+            </div>
+
+            <div class="form-buttons">
+              <button class="primary" id="draft-save">Save</button>
+              <button class="primary" id="draft-try">Save and try</button>
+              <button id="draft-record" class="text-btn" type="button">Record on TV instead</button>
+              <button id="add-cancel" class="text-btn" type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
+        <div class="panel hide-recording hide-channels-only">
+          <div class="panel-head">
+            <h2>Apps</h2>
+            <button id="apps-edit" class="link" type="button" hidden>Edit</button>
+          </div>
+          <div id="apps" class="apps"></div>
+          <div id="apps-picker" class="tv-picker" role="group" aria-label="Choose which apps to show" hidden></div>
+          <p id="apps-note" class="muted"></p>
+        </div>
+        <div class="panel hide-channels-only">
+          <h2><label for="text" style="margin:0;font-size:inherit">Type on the TV</label></h2>
+          <form id="type-form" class="type-row">
+            <input id="text" class="field" placeholder="Open a search box first" autocomplete="off" autocapitalize="off" enterkeyhint="send">
+            <button class="key" type="submit">Send</button>
+            <button class="key" data-key="Backspace" type="button">Delete</button>
+          </form>
+        </div>
+        <div class="panel hide-channels-only" id="inputs-panel" hidden>
+          <h2>Inputs</h2>
+          <div class="inputs">
+            <button class="key" data-key="InputHDMI1" type="button">HDMI 1</button>
+            <button class="key" data-key="InputHDMI2" type="button">HDMI 2</button>
+            <button class="key" data-key="InputHDMI3" type="button">HDMI 3</button>
+            <button class="key" data-key="InputHDMI4" type="button">HDMI 4</button>
+            <button class="key" data-key="InputTuner" type="button">Antenna</button>
+            <button class="key" data-key="InputAV1" type="button">AV</button>
+          </div>
+        </div>
+        <div class="panel hide-recording hide-channels-only">
+          <details id="settings-section" class="settings-section">
+          <summary><h2>Settings</h2></summary>
+          <p class="muted">Save this TV's channels to a file, or add channels from a file. Importing adds new channels and updates matching ones. It won't remove any.</p>
+          <div class="row cols-2 settings-actions">
+            <a id="export-channels" class="key" href="#">Export channels</a>
+            <button id="import-channels" class="key" type="button">Import channels</button>
+          </div>
+          <input id="import-file" type="file" accept=".json,application/json" hidden>
+
+          <div class="settings-block">
+            <h3>Lock view</h3>
+            <p class="muted">Shows only the TV and channel buttons, plus Back, Home and Start over, on every device. This prevents accidental changes, but it isn't a security feature.</p>
+            <form id="lock-form" class="type-row">
+              <input id="lock-pin" class="field" type="password" inputmode="numeric" pattern="[0-9]{4,12}" placeholder="Choose a 4 to 12 digit PIN" aria-label="Choose a PIN" autocomplete="new-password" required>
+              <button class="key">Lock</button>
+            </form>
+            <div id="lock-open" hidden>
+              <p class="muted">The lock is on, and unlocked on this device until it reloads or you lock it again.</p>
+              <div class="form-buttons">
+                <button id="relock" class="text-btn" type="button">Lock this device again</button>
+                <button id="lock-off" class="text-btn" type="button">Turn off lock for everyone</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-block">
+            <h3>Email alerts</h3>
+            <p class="muted">Sends an email when a channel button fails or no video starts, at most once per problem every 30 minutes. This can't report that this app, the computer running it or the internet is down.</p>
+            <form id="alerts-form" class="alerts-form">
+              <label>Send alerts to
+                <textarea id="alert-emails" class="field" rows="3" placeholder="One email address per line" autocomplete="off"></textarea>
+              </label>
+              <label>Send from
+                <select id="alert-provider" class="field">
+                  <option value="gmail">Gmail</option>
+                  <option value="other">Other email account</option>
+                </select>
+              </label>
+              <p id="gmail-help" class="muted">Use a separate Gmail account for this if you can. Turn on 2-Step Verification, then <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">create an app password</a> and enter it below, not your normal password.</p>
+              <div id="alert-server-fields" class="alerts-form" hidden>
+                <div class="delay-row">
+                  <label>Mail server
+                    <input id="alert-host" class="field" placeholder="mail.example.com" autocomplete="off">
+                  </label>
+                  <label>Port
+                    <input id="alert-port" class="field" type="number" min="1" max="65535" value="587">
+                  </label>
+                </div>
+                <label>Connection
+                  <select id="alert-security" class="field">
+                    <option value="starttls">STARTTLS (usually port 587)</option>
+                    <option value="ssl">SSL/TLS (usually port 465)</option>
+                  </select>
+                </label>
+                <label>Send from address (if different from the username)
+                  <input id="alert-from" class="field" autocomplete="off">
+                </label>
+              </div>
+              <label><span id="alert-username-label">Gmail address</span>
+                <input id="alert-username" class="field" autocomplete="off">
+              </label>
+              <label><span id="alert-password-label">App password</span>
+                <input id="alert-password" class="field" type="password" autocomplete="new-password">
+              </label>
+              <div class="form-buttons">
+                <button class="primary">Save alerts</button>
+                <button id="alert-test" class="text-btn" type="button">Send test email</button>
+              </div>
+              <p id="alert-status" class="muted" role="status"></p>
+            </form>
+          </div>
+          </details>
+        </div>
+        <div class="panel shortcuts hide-channels-only">
+          <p class="muted"><kbd>Arrows</kbd> move · <kbd>Enter</kbd> OK · <kbd>Backspace</kbd> back · <kbd>H</kbd> home · <kbd>Space</kbd> play/pause · <kbd>+</kbd> <kbd>-</kbd> volume · <kbd>M</kbd> mute</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="unlock-area">
+      <button id="unlock-show" class="link" type="button">Family: unlock</button>
+      <form id="unlock-form" class="type-row" hidden>
+        <input id="unlock-pin" class="field" type="password" inputmode="numeric" placeholder="PIN" aria-label="PIN" autocomplete="off" required>
+        <button class="key">Unlock</button>
+        <button id="unlock-cancel" class="key" type="button">Cancel</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="alert" hidden></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let tv = null;            // { ip, name, macs }
+let appsLoadedFor = null;
+let queue = Promise.resolve();
+let toastTimer;
+let appsList = [];        // Every app on the TV. The channel editor uses this full list.
+let hiddenApps = new Set();
+let editingApps = false;
+let activeAppId = null;
+let channels = [];
+let channelsLoadedFor = null;
+let editingChannels = false;
+let suppressChannelClick = false;
+let knownTvs = [];        // Every TV seen so far: { key, ip, name }
+let editingTvs = false;
+let channelsOnly = false;
+let lockIsOn = false;
+let unlockedHere = false;  // Only this device: a relative helping remotely doesn't unlock the viewer's screen.
+let alertsEnabled = false;
+let alertsFormEdited = false;
+let unlockPin = '';
+let draft = null;         // The channel open in the step editor: { id, steps }
+const DEFAULT_OPEN_MS = 9000;
+const RESET_APPS = new Set(['298229']);  // Frndly TV: the home-screen reset is tested and works.
+let recording = null;     // { id, name, appId, appName, steps, last, opening }
+let playing = false;
+const RECORDABLE = /^(Up|Down|Left|Right|Select|Back|Play|Rev|Fwd|InstantReplay|Info|Backspace|Lit_.*)$/;
+
+function toast(message, info = false) {
+  const el = $('toast');
+  el.textContent = message;
+  el.classList.toggle('info', info);
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, info ? 3000 : 7000);
+}
+
+async function api(path, body) {
+  const options = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch {
+    throw new Error('Lost connection to the remote server. Is it still running?');
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+  return data;
+}
+
+// Keys go out one at a time, so fast taps and typed text stay in order.
+function send(key) {
+  if (recording) {
+    if (recording.opening || !RECORDABLE.test(key)) return queue;
+    recordStep(key);
+  }
+  queue = queue
+    .then(() => api('/api/key', { ip: tv.ip, key }))
+    .catch((err) => toast(err.message));
+  return queue;
+}
+
+/* Saved view and the TV buttons */
+function applySettings(settings) {
+  channelsOnly = settings.channelsOnly;
+  knownTvs = settings.tvs;
+  lockIsOn = settings.locked;
+  alertsEnabled = settings.alerts.emails.length > 0 && Boolean(settings.alerts.host);
+  if (!lockIsOn) unlockedHere = false;
+  const locked = isLocked();
+  if (locked) editingChannels = false;
+  document.body.classList.toggle('locked', locked);
+  document.body.classList.toggle('channels-only', channelsOnly || locked);
+  $('lock-form').hidden = lockIsOn;
+  $('lock-open').hidden = !lockIsOn;
+  fillAlertsForm(settings.alerts);
+  $('channels-only').textContent = channelsOnly ? 'Show full remote' : 'Show only channels';
+  $('channels-only').setAttribute('aria-pressed', String(channelsOnly));
+  renderTvTabs();
+}
+
+function isLocked() {
+  return lockIsOn && !unlockedHere;
+}
+
+function showAlertProvider() {
+  const gmail = $('alert-provider').value === 'gmail';
+  $('gmail-help').hidden = !gmail;
+  $('alert-server-fields').hidden = gmail;
+  $('alert-username-label').textContent = gmail ? 'Gmail address' : 'Username';
+  $('alert-password-label').textContent = gmail ? 'App password' : 'Password';
+}
+
+function fillAlertsForm(alerts) {
+  $('alert-status').textContent = alerts.lastStatus || '';
+  if (alertsFormEdited) return;
+  $('alert-emails').value = alerts.emails.join('\n');
+  $('alert-provider').value = alerts.provider === 'other' ? 'other' : 'gmail';
+  $('alert-host').value = alerts.provider === 'other' ? alerts.host : '';
+  $('alert-port').value = alerts.port;
+  if (alerts.security !== 'none') $('alert-security').value = alerts.security;
+  $('alert-username').value = alerts.username;
+  $('alert-from').value = alerts.from === alerts.username ? '' : alerts.from;
+  $('alert-password').value = '';
+  $('alert-password').placeholder = alerts.hasPassword ? 'Saved. Leave blank to keep it.' : '';
+  showAlertProvider();
+}
+
+async function loadSettings() {
+  try {
+    applySettings(await api('/api/settings'));
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function renderTvTabs() {
+  // One TV needs no choice, and switching mid-edit would lose unsaved steps.
+  const shown = !draft && knownTvs.length > 1 ? knownTvs : [];
+  // With TV buttons showing, Change TV isn't needed. New TVs are added from the full remote.
+  $('change-tv').hidden = knownTvs.length > 1;
+  $('add-tv').hidden = knownTvs.length <= 1;
+  $('tvs-panel').hidden = !shown.length;
+  if (!shown.length || isLocked() || document.body.classList.contains('channels-only')) editingTvs = false;
+  $('tvs-edit').textContent = editingTvs ? 'Done' : 'Edit';
+  $('tvs-edit-note').hidden = !editingTvs;
+  if (editingTvs) {
+    $('tv-tabs').replaceChildren(...shown.map(tvRemover));
+    return;
+  }
+  $('tv-tabs').replaceChildren(...shown.map((known) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = known.name;
+    const active = tv && (known.ip === tv.ip || known.key === tv.key);
+    button.setAttribute('aria-pressed', String(Boolean(active)));
+    if (!active) button.addEventListener('click', () => connect(known.ip));
+    return button;
+  }));
+}
+
+function tvRemover(known) {
+  const box = document.createElement('div');
+  box.className = 'tv-remove';
+  box.append(known.name);
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.textContent = 'Remove';
+  let confirming = false;
+  remove.addEventListener('click', async () => {
+    if (!confirming) { confirming = true; remove.textContent = 'Tap again to remove'; return; }
+    try {
+      const result = await api('/api/tvs/remove', { key: known.key });
+      const wasCurrent = known.ip === tv.ip || known.key === tv.key;
+      applySettings(result);
+      toast(known.name + ' removed.', true);
+      if (wasCurrent) {
+        if (result.saved?.ip) {
+          await connect(result.saved.ip);
+        } else {
+          tv = null;
+          showSetup();
+        }
+      }
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  box.append(remove);
+  return box;
+}
+
+$('tvs-edit').addEventListener('click', () => {
+  editingTvs = !editingTvs;
+  renderTvTabs();
+});
+
+// A search finds newly added TVs and any whose address changed, without slowing startup.
+async function refreshKnownTvs() {
+  try {
+    await api('/api/discover');
+    await loadSettings();
+  } catch {}
+}
+
+/* Setup */
+function showSetup() {
+  $('remote').hidden = true;
+  $('setup').hidden = false;
+  $('cancel-setup').hidden = !tv;
+  scan();
+}
+
+function showRemote() {
+  $('setup').hidden = true;
+  $('remote').hidden = false;
+  $('tv-name').textContent = tv.name;
+  refresh();
+}
+
+async function scan() {
+  const list = $('found');
+  list.replaceChildren();
+  $('scan').disabled = true;
+  $('scan-status').textContent = 'Searching your network…';
+  try {
+    const { devices } = await api('/api/discover');
+    $('scan-status').textContent = devices.length ? 'Choose your TV:' : "Didn't find any Roku devices. Make sure the TV is on, or enter its IP address below.";
+    for (const device of devices) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = device.name;
+      const detail = document.createElement('small');
+      detail.textContent = [device.model, device.ip].filter(Boolean).join(' · ');
+      button.append(detail);
+      button.addEventListener('click', () => connect(device.ip));
+      const item = document.createElement('li');
+      item.append(button);
+      list.append(item);
+    }
+  } catch (err) {
+    $('scan-status').textContent = err.message;
+  }
+  $('scan').disabled = false;
+}
+
+async function connect(ip) {
+  try {
+    tv = await api('/api/select', { ip });
+    appsLoadedFor = null;
+    channelsLoadedFor = null;
+    appsList = [];
+    channels = [];
+    editingChannels = false;
+    renderChannels();
+    await loadSettings();
+    showRemote();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+/* Status */
+function setState(kind, text) {
+  $('dot').className = 'dot ' + kind;
+  $('state-text').textContent = text;
+}
+
+async function refresh() {
+  if (!tv) return;
+  const ip = tv.ip;
+  try {
+    const status = await api('/api/status?ip=' + encodeURIComponent(ip));
+    if (!tv || tv.ip !== ip) return;
+    if (!status.reachable) {
+      setState('down', 'Not responding, or in deep standby');
+      return;
+    }
+    $('tv-name').textContent = status.name;
+    $('inputs-panel').hidden = !status.isTv;
+    if (status.powerMode === 'PowerOn') setState('on', 'On');
+    else setState('standby', 'Standby');
+    if (appsLoadedFor !== ip) await loadApps(ip);
+    if (channelsLoadedFor !== ip) await loadChannels(ip);
+    activeAppId = status.activeApp;
+    document.querySelectorAll('.app').forEach((app) => {
+      app.classList.toggle('active', app.dataset.id === activeAppId);
+    });
+  } catch (err) {
+    setState('down', err.message);
+  }
+}
+
+async function loadApps(ip) {
+  const grid = $('apps');
+  try {
+    const { apps, hidden } = await api('/api/apps?ip=' + encodeURIComponent(ip));
+    appsList = apps;
+    hiddenApps = new Set(hidden);
+    appsLoadedFor = ip;
+    editingApps = false;
+    renderApps();
+    renderChannels();
+  } catch (err) {
+    $('apps-note').textContent = err.message;
+  }
+}
+
+function renderApps() {
+  const shown = appsList.filter((app) => !hiddenApps.has(app.id));
+  $('apps-edit').hidden = !appsList.length;
+  $('apps-edit').textContent = editingApps ? 'Done' : 'Edit';
+  $('apps').hidden = editingApps;
+  $('apps-picker').hidden = !editingApps;
+  $('apps').replaceChildren(...(editingApps ? [] : shown.map((app) => appButton(tv.ip, app))));
+  if (!appsList.length) $('apps-note').textContent = 'No apps found.';
+  else if (!editingApps && !shown.length) $('apps-note').textContent = 'All apps are hidden. Choose Edit to pick some.';
+  else $('apps-note').textContent = '';
+  document.querySelectorAll('.app').forEach((tile) => tile.classList.toggle('active', tile.dataset.id === activeAppId));
+  if (!editingApps) return;
+  $('apps-picker').replaceChildren(...appsList.map((app) => {
+    const label = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = !hiddenApps.has(app.id);
+    box.addEventListener('change', async () => {
+      const previous = new Set(hiddenApps);
+      if (box.checked) hiddenApps.delete(app.id); else hiddenApps.add(app.id);
+      try {
+        await api('/api/apps/hidden', { ip: tv.ip, hidden: [...hiddenApps] });
+      } catch (err) {
+        hiddenApps = previous;
+        box.checked = !hiddenApps.has(app.id);
+        toast(err.message);
+      }
+    });
+    label.append(box, ' ' + app.name);
+    return label;
+  }));
+}
+
+function appButton(ip, app) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'app';
+  button.dataset.id = app.id;
+  button.title = app.name;
+  button.setAttribute('aria-label', 'Open ' + app.name);
+  const label = document.createElement('span');
+  label.textContent = app.name;
+  const icon = document.createElement('img');
+  icon.alt = '';
+  icon.loading = 'lazy';
+  icon.src = `/api/icon?ip=${encodeURIComponent(ip)}&id=${encodeURIComponent(app.id)}`;
+  icon.addEventListener('error', () => icon.remove());
+  button.append(label, icon);
+  button.addEventListener('click', async () => {
+    try {
+      await api('/api/launch', { ip, id: app.id });
+      setTimeout(refresh, 1500);
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  return button;
+}
+
+/* Channels: a saved app plus the button presses that reach the channel inside it */
+async function loadChannels(ip) {
+  try {
+    const data = await api('/api/channels?ip=' + encodeURIComponent(ip));
+    if (!tv || tv.ip !== ip) return;
+    channels = data.channels;
+    channelsLoadedFor = ip;
+    renderChannels();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function renderChannels() {
+  const grid = $('channels');
+  $('channels-edit').hidden = !channels.length;
+  $('channels-edit').textContent = editingChannels ? 'Done' : 'Edit';
+  const tile = (channel) => editingChannels ? channelEditor(channel) : channelButton(channel);
+  const shortcuts = channels.filter((channel) => channel.isShortcut);
+  $('shortcuts').replaceChildren(...shortcuts.map(tile));
+  $('shortcuts-group').hidden = !shortcuts.length || Boolean(draft);
+  const tiles = channels.filter((channel) => !channel.isShortcut).map(tile);
+  if (!editingChannels) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'channel add';
+    add.textContent = '+ Add channel';
+    add.addEventListener('click', openAddForm);
+    tiles.push(add);
+  }
+  grid.replaceChildren(...tiles);
+}
+
+function channelLabel(parent, channel) {
+  const name = document.createElement('strong');
+  name.textContent = channel.name;
+  const app = document.createElement('small');
+  app.textContent = channel.appName + (channel.devices?.length > 1 ? ` · ${channel.devices.length} TVs` : '');
+  parent.append(name, app);
+}
+
+function channelButton(channel) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'channel';
+  button.dataset.id = channel.id;
+  channelLabel(button, channel);
+  button.addEventListener('click', () => playChannel(channel));
+  enableDrag(button, button, true);  // On touchscreens a drag here should scroll, so touch uses Edit's handle.
+  return button;
+}
+
+/* Drag and drop: moves the tile live as the pointer passes over others, then saves the order. */
+function enableDrag(tile, handle, mouseOnly) {
+  let start = null;
+  let dragging = false;
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || (mouseOnly && event.pointerType !== 'mouse') || isLocked()) return;
+    start = { x: event.clientX, y: event.clientY };
+    dragging = false;
+    try { handle.setPointerCapture(event.pointerId); } catch {}
+  });
+  handle.addEventListener('pointermove', (event) => {
+    if (!start) return;
+    if (!dragging) {
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
+      dragging = true;
+      tile.classList.add('dragging');
+    }
+    // Tiles only move within their own group, Shortcuts or Channels.
+    const over = document.elementFromPoint(event.clientX, event.clientY)?.closest('.channel[data-id]');
+    if (!over || over === tile || over.parentElement !== tile.parentElement) return;
+    const tiles = [...tile.parentElement.querySelectorAll('.channel[data-id]')];
+    over[tiles.indexOf(over) > tiles.indexOf(tile) ? 'after' : 'before'](tile);
+  });
+  const finish = () => {
+    if (!start) return;
+    start = null;
+    if (!dragging) return;
+    dragging = false;
+    tile.classList.remove('dragging');
+    suppressChannelClick = true;
+    setTimeout(() => { suppressChannelClick = false; }, 0);
+    saveChannelOrder();
+  };
+  handle.addEventListener('pointerup', finish);
+  handle.addEventListener('pointercancel', finish);
+}
+
+async function saveChannelOrder() {
+  const ids = [...document.querySelectorAll('#shortcuts .channel[data-id], #channels .channel[data-id]')].map((tile) => tile.dataset.id);
+  channels.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  try {
+    await api('/api/channels/reorder', { ip: tv.ip, ids });
+  } catch (err) {
+    toast(err.message);
+    loadChannels(tv.ip);
+  }
+}
+
+function moveChannelBy(channel, offset) {
+  const group = channels.filter((c) => Boolean(c.isShortcut) === Boolean(channel.isShortcut));
+  const neighbor = group[group.indexOf(channel) + offset];
+  if (!neighbor) return;
+  const from = channels.indexOf(channel);
+  const to = channels.indexOf(neighbor);
+  channels[from] = neighbor;
+  channels[to] = channel;
+  renderChannels();
+  const ids = channels.map((c) => c.id);
+  document.querySelector(`.channel[data-id="${CSS.escape(channel.id)}"] .drag-handle`)?.focus();
+  api('/api/channels/reorder', { ip: tv.ip, ids }).catch((err) => { toast(err.message); loadChannels(tv.ip); });
+}
+
+function channelEditor(channel) {
+  const tile = document.createElement('div');
+  tile.className = 'channel';
+  tile.dataset.id = channel.id;
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'drag-handle';
+  handle.textContent = '⠿ Drag to move';
+  handle.setAttribute('aria-label', `Move ${channel.name}. Use the arrow keys, or drag.`);
+  handle.addEventListener('keydown', (event) => {
+    const offset = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
+    if (!offset) return;
+    event.preventDefault();
+    event.stopPropagation();  // Arrow keys here move the channel, not the TV's cursor.
+    moveChannelBy(channel, offset);
+  });
+  enableDrag(tile, handle, false);
+  tile.append(handle);
+  channelLabel(tile, channel);
+  const actions = document.createElement('div');
+  actions.className = 'channel-actions';
+  const rename = document.createElement('button');
+  rename.type = 'button';
+  rename.textContent = 'Edit name, TVs & steps';
+  rename.addEventListener('click', () => openEditor(channel));
+  actions.append(rename);
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = 'Copy';
+  copy.addEventListener('click', () => openEditor(channel, true));
+  actions.append(copy);
+  const shared = channel.devices.length > 1;
+  const again = document.createElement('button');
+  again.type = 'button';
+  again.textContent = 'Record again';
+  again.addEventListener('click', () => startRecording(channel));
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'danger';
+  remove.textContent = shared ? 'Delete from this TV' : 'Delete';
+  let confirming = false;
+  remove.addEventListener('click', async () => {
+    if (!confirming) { confirming = true; remove.textContent = 'Tap to confirm'; return; }
+    try {
+      await api('/api/channels/delete', { ip: tv.ip, id: channel.id });
+      channels = channels.filter((c) => c.id !== channel.id);
+      if (!channels.length) editingChannels = false;
+      renderChannels();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  actions.append(again, remove);
+  tile.append(actions);
+  return tile;
+}
+
+/* TV dropdown in the editor. This TV is always included: use Delete to take a channel off it. */
+function isCurrentTv(known) {
+  return known.ip === tv.ip || known.key === tv.key;
+}
+
+function selectedTvs() {
+  return draft.allTvs ? 'all' : knownTvs.filter((known) => isCurrentTv(known) || draft.tvKeys.has(known.key)).map((known) => known.key);
+}
+
+function renderTvSelect() {
+  const row = $('tv-select-row');
+  row.hidden = knownTvs.length < 2;
+  if (row.hidden) return;
+  const others = knownTvs.filter((known) => !isCurrentTv(known) && draft.tvKeys.has(known.key)).map((known) => known.name);
+  $('tv-select-summary').textContent = draft.allTvs
+    ? 'All TVs'
+    : [$('tv-name').textContent + ' (this TV)', ...others].join(', ');
+  const option = (name, checked, disabled, onChange) => {
+    const label = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = checked;
+    box.disabled = disabled;
+    box.addEventListener('change', () => onChange(box.checked));
+    label.append(box, name);
+    return label;
+  };
+  const all = option('All TVs', draft.allTvs, false, (checked) => { draft.allTvs = checked; renderTvSelect(); });
+  all.classList.add('all-option');
+  $('tv-select-menu').replaceChildren(all, ...knownTvs.map((known) => {
+    const current = isCurrentTv(known);
+    return option(known.name + (current ? ' (this TV)' : ''), draft.allTvs || current || draft.tvKeys.has(known.key), draft.allTvs || current, (checked) => {
+      if (checked) draft.tvKeys.add(known.key); else draft.tvKeys.delete(known.key);
+      renderTvSelect();
+    });
+  }));
+}
+
+function skippedMessage(saved) {
+  return saved.skipped?.length ? ` Not added to ${saved.skipped.join(', ')}, which ${saved.skipped.length > 1 ? "don't" : "doesn't"} have ${saved.appName}.` : '';
+}
+
+/* Step editor: build or change a channel by hand. Nothing here is sent to the TV until it's played. */
+function openAddForm() {
+  openEditor(null);
+}
+
+// With asCopy, the editor starts from a channel's settings but saves as a new channel.
+function openEditor(channel, asCopy = false) {
+  if (!appsList.length) {
+    toast("The app list isn't available, so channels can't be edited yet. See the message under Apps.");
+    return;
+  }
+  const steps = (channel?.steps || []).map((step) => ({ ...step }));
+  let openDelayMs = channel?.openDelayMs;
+  if (openDelayMs === undefined) {
+    // Older recordings kept the app wait in the first press's delay.
+    openDelayMs = channel && steps.length ? steps[0].delayMs : DEFAULT_OPEN_MS;
+    if (channel && steps.length) steps[0].delayMs = 0;
+  }
+  draft = {
+    id: asCopy ? undefined : channel?.id,
+    steps,
+    // New channels go on every TV unless changed here.
+    allTvs: channel ? Boolean(channel.allTvs) : true,
+    tvKeys: new Set(channel?.devices || []),
+  };
+  editingChannels = false;
+  const select = $('channel-app');
+  const options = [...appsList];
+  if (channel && !options.some((app) => app.id === channel.appId)) options.push({ id: channel.appId, name: channel.appName });
+  select.replaceChildren(...options.map((app) => {
+    const option = document.createElement('option');
+    option.value = app.id;
+    option.textContent = app.name;
+    return option;
+  }));
+  if (channel) select.value = channel.appId;
+  $('tv-select').open = false;
+  renderTvSelect();
+  $('reset-first').checked = channel ? Boolean(channel.resetFirst) : RESET_APPS.has(select.value);
+  $('expect-video').checked = channel?.expectVideo !== false;
+  $('is-shortcut').checked = Boolean(channel?.isShortcut);
+  $('channel-name').value = channel ? (asCopy ? `${channel.name} copy`.slice(0, 40) : channel.name) : '';
+  $('open-delay').value = Math.round(openDelayMs / 100) / 10;
+  $('step-text').value = '';
+  $('channels').hidden = true;
+  $('shortcuts-group').hidden = true;
+  $('channels-edit').hidden = true;
+  $('add-channel').hidden = false;
+  renderTvTabs();
+  renderSteps();
+  $('channel-name').focus();
+}
+
+function closeEditor() {
+  draft = null;
+  $('add-channel').hidden = true;
+  $('channels').hidden = false;
+  renderChannels();
+  renderTvTabs();
+}
+
+function gapMs() {
+  const seconds = parseFloat($('step-gap').value);
+  return Math.round(Math.min(Math.max(Number.isFinite(seconds) ? seconds : 1, 0.3), 60) * 1000);
+}
+
+function addStep(key) {
+  if (draft.steps.length >= 300) { toast('A channel can have up to 300 presses.'); return; }
+  draft.steps.push({ key, delayMs: gapMs() });
+  renderSteps();
+}
+
+function stepButton(label, content, disabled, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.setAttribute('aria-label', label);
+  button.disabled = disabled;
+  if (content.startsWith('#')) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', content);
+    svg.append(use);
+    button.append(svg);
+  } else {
+    button.textContent = content;
+  }
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function renderSteps() {
+  const steps = draft.steps;
+  $('steps-empty').hidden = steps.length > 0;
+  $('steps').replaceChildren(...steps.map((step, index) => {
+    const row = document.createElement('li');
+    row.className = 'step';
+    const wait = document.createElement('label');
+    wait.className = 'wait';
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0.3';
+    input.max = '60';
+    input.step = 'any';
+    input.value = Math.round(Math.max(step.delayMs, 300) / 100) / 10;
+    input.setAttribute('aria-label', `Seconds to wait before press ${index + 1}`);
+    input.addEventListener('input', () => {
+      const seconds = parseFloat(input.value);
+      if (Number.isFinite(seconds)) step.delayMs = Math.round(Math.min(Math.max(seconds, 0.3), 60) * 1000);
+    });
+    wait.append('Wait ', input, ' s, then');
+    const name = document.createElement('strong');
+    name.textContent = stepLabel(step.key);
+    const move = (from, to) => { steps.splice(to, 0, steps.splice(from, 1)[0]); renderSteps(); };
+    const actions = document.createElement('div');
+    actions.className = 'step-actions';
+    actions.append(
+      stepButton(`Move press ${index + 1} up`, '#i-up', index === 0, () => move(index, index - 1)),
+      stepButton(`Move press ${index + 1} down`, '#i-down', index === steps.length - 1, () => move(index, index + 1)),
+      stepButton(`Remove press ${index + 1}`, '×', false, () => { steps.splice(index, 1); renderSteps(); }),
+    );
+    row.append(wait, name, actions);
+    return row;
+  }));
+}
+
+async function saveDraft(andTry) {
+  const select = $('channel-app');
+  const openSeconds = parseFloat($('open-delay').value);
+  const channel = {
+    id: draft.id,
+    name: $('channel-name').value.trim(),
+    appId: select.value,
+    appName: select.selectedOptions[0].textContent,
+    openDelayMs: Math.round(Math.min(Math.max(Number.isFinite(openSeconds) ? openSeconds : 0, 0), 120) * 1000),
+    resetFirst: $('reset-first').checked,
+    expectVideo: $('expect-video').checked,
+    isShortcut: $('is-shortcut').checked,
+    steps: draft.steps,
+  };
+  if (!channel.name) { $('channel-name').focus(); return; }
+  try {
+    const saved = await api('/api/channels/save', { ip: tv.ip, channel, tvs: selectedTvs() });
+    closeEditor();
+    await loadChannels(tv.ip);
+    if (saved.skipped.length) toast(saved.name + ' saved.' + skippedMessage(saved));
+    else if (!andTry) toast(saved.name + ' saved.', true);
+    if (andTry) playChannel(saved);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+function showBanner(title, detail, canSave, cancelLabel) {
+  $('banner').hidden = false;
+  $('banner-title').textContent = title;
+  $('banner-detail').textContent = detail;
+  $('banner-save').hidden = !canSave;
+  $('banner-cancel').textContent = cancelLabel;
+}
+
+function stepLabel(key) {
+  if (key === 'Select') return 'OK';
+  return key.startsWith('Lit_') ? `"${key.slice(4)}"` : key;
+}
+
+function updateRecordingBanner() {
+  const steps = recording.steps;
+  const detail = steps.length
+    ? `${steps.length} recorded: ` + steps.slice(-8).map((step) => stepLabel(step.key)).join(', ')
+    : recording.resetFirst
+      ? 'The app is ready at its top menu. Press the buttons to reach the channel.'
+      : 'Wait until the app has fully loaded, then press the buttons to reach the channel.';
+  showBanner('Recording ' + recording.name, detail, true, 'Cancel');
+}
+
+async function startRecording(channel) {
+  $('add-channel').hidden = true;
+  editingChannels = false;
+  recording = { ...channel, steps: [], opening: true };
+  document.body.classList.add('is-recording');
+  showBanner('Opening ' + channel.appName + '…', 'Hold on while the app opens.', false, 'Cancel');
+  window.scrollTo(0, 0);
+  try {
+    const { opened } = await api('/api/channels/open', {
+      ip: tv.ip,
+      id: channel.appId,
+      resetFirst: Boolean(channel.resetFirst),
+      openDelayMs: channel.openDelayMs,
+    });
+    if (!recording) return;
+    if (!opened) { endRecording(); return; }
+    recording.opening = false;
+    recording.last = performance.now();
+    updateRecordingBanner();
+  } catch (err) {
+    toast(err.message);
+    endRecording();
+  }
+}
+
+function recordStep(key) {
+  const now = performance.now();
+  recording.steps.push({ key, delayMs: Math.round(now - recording.last) });
+  recording.last = now;
+  updateRecordingBanner();
+}
+
+function endRecording() {
+  recording = null;
+  document.body.classList.remove('is-recording');
+  $('banner').hidden = true;
+  renderChannels();
+}
+
+async function saveRecording() {
+  if (!recording) return;
+  const { id, name, appId, appName, resetFirst, expectVideo, isShortcut } = recording;
+  // Without the reset, the wait before the first press is how long the app took to open.
+  const openDelayMs = resetFirst ? recording.openDelayMs : (recording.steps.length ? recording.steps[0].delayMs : 0);
+  const steps = resetFirst ? recording.steps : recording.steps.map((step, index) => (index ? step : { ...step, delayMs: 0 }));
+  try {
+    const saved = await api('/api/channels/save', { ip: tv.ip, channel: { id, name, appId, appName, openDelayMs, resetFirst, expectVideo, isShortcut, steps }, tvs: recording.tvs });
+    endRecording();
+    await loadChannels(tv.ip);
+    const shared = channels.find((c) => c.id === saved.id)?.devices.length > 1;
+    toast(saved.name + (shared ? ' saved on all its TVs. Try it on each one.' : ' saved. Tap it to try it.') + skippedMessage(saved), !saved.skipped.length);
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function playChannel(channel) {
+  if (playing) return;
+  playing = true;
+  document.body.classList.add('is-busy');
+  showBanner('Going to ' + channel.name + '…', isLocked() ? 'One moment.' : 'Sending the saved presses to the TV.', false, 'Stop');
+  const familyTold = alertsEnabled ? ' Your family has been told.' : '';
+  try {
+    const result = await api('/api/channels/play', { ip: tv.ip, id: channel.id });
+    if (result.verified === false) {
+      toast(`${channel.name} may not have worked, because nothing seems to be playing. Try it again, or press Start over.` + familyTold);
+    }
+  } catch (err) {
+    toast(isLocked() ? `${channel.name} didn't work. Try it again, or press Start over.` + familyTold : err.message);
+  }
+  playing = false;
+  document.body.classList.remove('is-busy');
+  $('banner').hidden = true;
+  refresh();
+}
+
+$('apps-edit').addEventListener('click', () => {
+  editingApps = !editingApps;
+  renderApps();
+});
+
+/* Start over: stop anything running and return to the Roku home screen */
+document.querySelector('.start-over').addEventListener('click', async () => {
+  if (recording) return;
+  try {
+    await api('/api/start-over', { ip: tv.ip });
+    toast('Back at the start. Choose a channel.', true);
+  } catch (err) {
+    toast(isLocked() ? "That didn't work. Check that the TV is on, then try again." : err.message);
+  }
+});
+
+/* Lock: a PIN unlocks only the device it's entered on */
+function resetUnlockForm() {
+  $('unlock-pin').value = '';
+  $('unlock-form').hidden = true;
+  $('unlock-show').hidden = false;
+}
+$('unlock-show').addEventListener('click', () => {
+  $('unlock-show').hidden = true;
+  $('unlock-form').hidden = false;
+  $('unlock-pin').focus();
+});
+$('unlock-cancel').addEventListener('click', resetUnlockForm);
+$('unlock-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const pin = $('unlock-pin').value;
+    const settings = await api('/api/lock', { action: 'verify', pin });
+    unlockedHere = true;
+    unlockPin = pin;
+    resetUnlockForm();
+    applySettings(settings);
+    renderChannels();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('lock-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const settings = await api('/api/lock', { action: 'lock', pin: $('lock-pin').value });
+    $('lock-pin').value = '';
+    unlockedHere = false;
+    applySettings(settings);
+    renderChannels();
+    window.scrollTo(0, 0);
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('relock').addEventListener('click', async () => {
+  unlockedHere = false;
+  unlockPin = '';
+  await loadSettings();
+  renderChannels();
+  window.scrollTo(0, 0);
+});
+$('lock-off').addEventListener('click', async () => {
+  try {
+    applySettings(await api('/api/lock', { action: 'off', pin: unlockPin }));
+    unlockPin = '';
+    toast('The lock is off for everyone.', true);
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+/* Email alerts */
+['alert-emails', 'alert-provider', 'alert-host', 'alert-port', 'alert-security', 'alert-username', 'alert-password', 'alert-from'].forEach((id) => {
+  $(id).addEventListener('input', () => { alertsFormEdited = true; });
+});
+$('alert-provider').addEventListener('change', showAlertProvider);
+async function saveAlerts() {
+  const settings = await api('/api/alerts', {
+    provider: $('alert-provider').value,
+    emails: $('alert-emails').value.split(/[\s,;]+/).filter(Boolean),
+    host: $('alert-host').value,
+    port: $('alert-port').value,
+    security: $('alert-security').value,
+    username: $('alert-username').value,
+    password: $('alert-password').value,
+    from: $('alert-from').value,
+  });
+  alertsFormEdited = false;
+  applySettings(settings);
+}
+$('alerts-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await saveAlerts();
+    toast('Email alerts saved.', true);
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('alert-test').addEventListener('click', async () => {
+  const button = $('alert-test');
+  button.disabled = true;
+  try {
+    await saveAlerts();
+    await api('/api/alerts/test', {});
+    toast('Test email sent. Check that it arrived, including in spam.', true);
+  } catch (err) {
+    toast(err.message);
+  }
+  button.disabled = false;
+});
+
+/* Settings: move channels between TVs, the site and the app using a file */
+$('export-channels').addEventListener('click', (event) => {
+  if (!channels.length) {
+    event.preventDefault();
+    toast('This TV has no channels to export yet.');
+    return;
+  }
+  event.currentTarget.href = '/api/channels/export?ip=' + encodeURIComponent(tv.ip);
+});
+$('import-channels').addEventListener('click', () => $('import-file').click());
+$('import-file').addEventListener('change', async () => {
+  const input = $('import-file');
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch {
+      throw new Error("That file isn't a channel export from this app, so nothing was changed.");
+    }
+    const result = await api('/api/channels/import', { ip: tv.ip, data });
+    await loadChannels(tv.ip);
+    let message = `${result.added} added, ${result.updated} updated on ${$('tv-name').textContent}.`;
+    if (result.missingApps.length) message += ` This TV doesn't have: ${result.missingApps.join(', ')}.`;
+    toast(message, !result.missingApps.length);
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$('channels-only').addEventListener('click', async () => {
+  try {
+    applySettings(await api('/api/settings', { channelsOnly: !channelsOnly }));
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+// The click that ends a drag shouldn't also play the channel.
+['channels', 'shortcuts'].forEach((id) => $(id).addEventListener('click', (event) => {
+  if (suppressChannelClick) { event.stopPropagation(); event.preventDefault(); }
+}, true));
+$('is-shortcut').addEventListener('change', () => {
+  $('expect-video').checked = !$('is-shortcut').checked;  // Menus don't start video, but this can still be changed.
+});
+$('channels-edit').addEventListener('click', () => {
+  editingChannels = !editingChannels;
+  renderChannels();
+});
+$('add-cancel').addEventListener('click', closeEditor);
+$('add-channel').addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveDraft(event.submitter?.id === 'draft-try');
+});
+$('draft-record').addEventListener('click', () => {
+  const select = $('channel-app');
+  const name = $('channel-name').value.trim();
+  if (!name) { $('channel-name').focus(); toast('Name the channel first.'); return; }
+  const seconds = parseFloat($('open-delay').value);
+  const channel = {
+    id: draft.id,
+    name,
+    appId: select.value,
+    appName: select.selectedOptions[0].textContent,
+    resetFirst: $('reset-first').checked,
+    expectVideo: $('expect-video').checked,
+    isShortcut: $('is-shortcut').checked,
+    openDelayMs: Math.round(Math.min(Math.max(Number.isFinite(seconds) ? seconds : DEFAULT_OPEN_MS / 1000, 0), 120) * 1000),
+    tvs: selectedTvs(),
+  };
+  closeEditor();
+  startRecording(channel);
+});
+document.querySelectorAll('[data-add]').forEach((button) => {
+  button.addEventListener('click', () => addStep(button.dataset.add));
+});
+$('channel-app').addEventListener('change', () => {
+  if (draft && !draft.id) $('reset-first').checked = RESET_APPS.has($('channel-app').value);
+});
+$('gap-all').addEventListener('click', () => {
+  const delayMs = gapMs();
+  draft.steps.forEach((step) => { step.delayMs = delayMs; });
+  renderSteps();
+});
+function addTypedLetters() {
+  const input = $('step-text');
+  for (const letter of input.value) addStep('Lit_' + letter);
+  input.value = '';
+}
+$('step-text-add').addEventListener('click', addTypedLetters);
+$('step-text').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') { event.preventDefault(); addTypedLetters(); }
+});
+$('banner-save').addEventListener('click', saveRecording);
+$('banner-cancel').addEventListener('click', () => {
+  if (recording || playing) api('/api/channels/stop', { ip: tv.ip }).catch(() => {});
+  if (recording) endRecording();
+});
+
+document.querySelectorAll('[data-key]').forEach((button) => {
+  if (!RECORDABLE.test(button.dataset.key)) button.classList.add('no-record');
+});
+$('power-on').classList.add('no-record');
+
+/* Remote buttons: tap to press, hold to repeat on buttons marked data-repeat */
+document.querySelectorAll('[data-key]').forEach((button) => {
+  let holdTimer, repeatTimer, repeated = false;
+  const stop = () => { clearTimeout(holdTimer); clearInterval(repeatTimer); };
+  button.addEventListener('click', () => {
+    if (repeated) { repeated = false; return; }
+    send(button.dataset.key);
+    if (button.dataset.key === 'PowerOff') setTimeout(refresh, 2000);
+  });
+  if (!('repeat' in button.dataset)) return;
+  button.addEventListener('pointerdown', () => {
+    repeated = false;
+    holdTimer = setTimeout(() => {
+      repeatTimer = setInterval(() => { repeated = true; send(button.dataset.key); }, 180);
+    }, 400);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((name) => button.addEventListener(name, stop));
+  button.addEventListener('contextmenu', (event) => event.preventDefault());
+});
+
+$('power-on').addEventListener('click', async () => {
+  const button = $('power-on');
+  button.disabled = true;
+  setState('standby', 'Turning on…');
+  try {
+    await api('/api/power-on', { ip: tv.ip });
+    setTimeout(refresh, 1500);
+  } catch (err) {
+    toast(err.message);
+    refresh();
+  }
+  button.disabled = false;
+});
+
+$('type-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = $('text');
+  const characters = [...input.value];
+  input.value = '';
+  for (const character of characters) send('Lit_' + character);
+});
+
+$('change-tv').addEventListener('click', showSetup);
+$('add-tv').addEventListener('click', showSetup);
+$('cancel-setup').addEventListener('click', showRemote);
+$('scan').addEventListener('click', scan);
+$('manual').addEventListener('submit', (event) => {
+  event.preventDefault();
+  connect($('manual-ip').value.trim());
+});
+
+/* Keyboard shortcuts */
+const shortcuts = {
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  Enter: 'Select', Backspace: 'Back', ' ': 'Play', h: 'Home',
+  '+': 'VolumeUp', '=': 'VolumeUp', '-': 'VolumeDown', m: 'VolumeMute',
+};
+document.addEventListener('keydown', (event) => {
+  if ($('remote').hidden || draft || (document.body.classList.contains('channels-only') && !recording) || event.target.matches('input, select') || event.ctrlKey || event.metaKey || event.altKey) return;
+  // Enter and Space on a focused button should press that button instead.
+  if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('button')) return;
+  const key = shortcuts[event.key.length === 1 ? event.key.toLowerCase() : event.key];
+  if (!key) return;
+  event.preventDefault();
+  send(key);
+  const button = document.querySelector(`[data-key="${key}"]`);
+  if (button) {
+    button.classList.add('pressed');
+    setTimeout(() => button.classList.remove('pressed'), 120);
+  }
+});
+
+setInterval(() => { if (!document.hidden && !$('remote').hidden) refresh(); }, 8000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('remote').hidden) refresh(); });
+
+(async () => {
+  await loadSettings();
+  try {
+    const saved = await api('/api/saved');
+    if (saved.ip) {
+      tv = saved;
+      renderTvTabs();
+      showRemote();
+      refreshKnownTvs();
+      return;
+    }
+  } catch {}
+  showSetup();
+})();
+</script>
+</body>
+</html>
