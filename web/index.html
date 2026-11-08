@@ -160,6 +160,7 @@
   .tv-picker { display: grid; gap: 8px; text-align: left; padding: 4px; }
   .tv-picker label { margin: 0; display: flex; align-items: center; gap: 8px; min-height: 32px; }
   .tv-picker input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+  .tv-picker .all-option { border-bottom: 1px solid var(--line); padding-bottom: 8px; font-weight: 600; }
   #add-channel { margin-top: 12px; display: grid; gap: 8px; }
   #add-channel label { margin: 0; color: var(--muted); }
   #add-channel .field { display: block; margin-top: 4px; }
@@ -834,25 +835,42 @@ function renderApps() {
   else $('apps-note').textContent = '';
   document.querySelectorAll('.app').forEach((tile) => tile.classList.toggle('active', tile.dataset.id === activeAppId));
   if (!editingApps) return;
-  $('apps-picker').replaceChildren(...appsList.map((app) => {
+  const checkbox = (text) => {
     const label = document.createElement('label');
     const box = document.createElement('input');
     box.type = 'checkbox';
-    box.checked = !hiddenApps.has(app.id);
-    box.addEventListener('change', async () => {
-      const previous = new Set(hiddenApps);
-      if (box.checked) hiddenApps.delete(app.id); else hiddenApps.add(app.id);
-      try {
-        await api('/api/apps/hidden', { ip: tv.ip, hidden: [...hiddenApps] });
-      } catch (err) {
-        hiddenApps = previous;
-        box.checked = !hiddenApps.has(app.id);
-        toast(err.message);
-      }
-    });
-    label.append(box, ' ' + app.name);
-    return label;
+    label.append(box, ' ' + text);
+    return [label, box];
+  };
+  const [allLabel, allBox] = checkbox('Select all');
+  allLabel.classList.add('all-option');
+  const rows = appsList.map((app) => [app, ...checkbox(app.name)]);
+  const sync = () => {
+    rows.forEach(([app, , box]) => { box.checked = !hiddenApps.has(app.id); });
+    const shownCount = appsList.filter((app) => !hiddenApps.has(app.id)).length;
+    allBox.checked = shownCount === appsList.length;
+    allBox.indeterminate = shownCount > 0 && shownCount < appsList.length;
+  };
+  const save = async (change) => {
+    const previous = new Set(hiddenApps);
+    change();
+    sync();
+    try {
+      await api('/api/apps/hidden', { ip: tv.ip, hidden: [...hiddenApps] });
+    } catch (err) {
+      hiddenApps = previous;
+      sync();
+      toast(err.message);
+    }
+  };
+  allBox.addEventListener('change', () => save(() => {
+    hiddenApps = allBox.checked ? new Set() : new Set(appsList.map((app) => app.id));
   }));
+  rows.forEach(([app, , box]) => box.addEventListener('change', () => save(() => {
+    if (box.checked) hiddenApps.delete(app.id); else hiddenApps.add(app.id);
+  })));
+  sync();
+  $('apps-picker').replaceChildren(allLabel, ...rows.map(([, label]) => label));
 }
 
 function appButton(ip, app) {
