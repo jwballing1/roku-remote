@@ -11,6 +11,7 @@ the Roku remote hard to use.
 - [The remote](#the-remote)
 - [Channel buttons](#channel-buttons)
 - [Adding and editing channels](#adding-and-editing-channels)
+- [Schedules](#schedules)
 - [Choosing which TVs and apps show](#choosing-which-tvs-and-apps-show)
 - [Setting it up for someone else](#setting-it-up-for-someone-else)
 - [Settings](#settings)
@@ -107,7 +108,7 @@ on until you choose **Show full remote**.
 | Setting | What it means |
 |---|---|
 | **TVs** | Which TVs get this button. New buttons go on **All TVs**, including TVs added later. |
-| **Wait for app to open** | How long to wait for the app before pressing anything. Raise it if the app is slow to load. |
+| **Wait after the app opens** | TV Remote first waits until the Roku reports the app open, however long that takes, then waits this long for the app's menus to load before pressing anything. Raise it if presses start too early. If the app doesn't open within 45 seconds, the button stops and reports a problem instead of pressing anyway. |
 | **Delay between presses** | The wait added before each new press. Each press also has its own wait, which you can change. |
 | **This isn't a channel** | Puts the button under Shortcuts, for things like a guide or menu |
 | **Check that video starts** | Warns, and sends an email alert, if no video starts. Turn it off for menu buttons. |
@@ -151,7 +152,37 @@ Changes to a button shared by several TVs apply on all of them.
 - **Test on each TV:** a button recorded on one TV may land differently on another.
 - **Leave enough time:** if a button sometimes lands in the wrong place, raise the waits.
 - **Re-check after app updates:** a button that misses after an update usually just needs recording
-  again.
+  again. TV Remote helps with this. Each button remembers the app's version on each TV when it's saved and
+  whenever it plays and video starts. If the app has been updated since then, the button shows
+  **"... updated. Record again if it misses."**. Playing it successfully clears the warning, and alert
+  emails mention the update. The warning doesn't show in the locked view.
+
+---
+
+## Schedules
+
+A schedule plays a channel button at a set time on chosen days, on one TV or several at once. For
+example, the news every weekday morning in the living room and the den.
+
+1. In the **Schedules** section of the full remote, choose **+ Add schedule**.
+2. Choose the channel, the time and the days. **Every day**, **Weekdays** and **Weekends** fill in
+   the days for you.
+3. Under **TVs**, check every TV it should play on. Only TVs that have the channel can be checked.
+4. Choose **Save schedule**.
+
+So a schedule never surprises anyone watching, it skips a TV when:
+- the TV is a Roku TV that's turned off (schedules never turn a TV on)
+- the TV doesn't answer, for example because its stick has no power
+- another button is already running on it
+- something is already playing, unless you uncheck **Skip if something is already playing**
+
+Each schedule shows what happened on each TV the last time it ran, such as "Den: Played" or
+"Family room: Skipped: something was already playing". If a scheduled button fails or no video starts,
+email alerts are sent as usual. Uncheck the box next to a schedule to pause it without deleting it.
+
+Schedules play only while TV Remote is running, on the computer that runs the website or in the
+Windows app, and they use that computer's clock. The website and the Windows app keep separate
+schedules, so set them up in the one that stays running.
 
 ---
 
@@ -233,7 +264,9 @@ Alerts can't report that TV Remote itself, the computer running it, or the inter
 | **No TVs found** | Make sure the Roku is on and on the same Wi-Fi network, not a guest network. Then try typing its IP address. |
 | **"The TV refused this command"** | On the Roku, set **Control by mobile apps** to **Permissive**. |
 | **Apps list shows an error** | Same as above. |
-| **A channel button lands in the wrong place** | Raise **Wait for app to open** and the delays, or record it again. For Frndly TV, turn on **Start from the app's home screen**. |
+| **A channel button lands in the wrong place** | Raise **Wait after the app opens** and the delays, or record it again. For Frndly TV, turn on **Start from the app's home screen**. If the button says the app was updated, record it again. |
+| **"The app didn't open within 45 seconds"** | Check that the app still opens from the Roku home screen. It may be updating, or need you to sign in again. |
+| **A schedule didn't play** | Check its last run. TV Remote must be running at the scheduled time, and TVs that are off or already playing something are skipped. |
 | **"Nothing seems to be playing"** | Press **Start over** and try again. If it keeps happening, the button needs fixing. For menu buttons, turn off **Check that video starts**. |
 | **Turn on, Turn off or volume do nothing** | With a Roku stick, these only work if the TV supports HDMI-CEC. Use the TV's own remote or buttons. |
 | **Forgot the lock PIN** | Someone with access to the computer running TV Remote can clear the lock in `settings.json`. |

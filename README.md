@@ -38,7 +38,7 @@ The website keeps these in `web\`, next to `server.py`. The Windows app keeps it
 | File | Contents |
 |---|---|
 | `tv.json` | The TV currently selected |
-| `channels.json` | Channel and shortcut buttons, for each TV |
-| `settings.json` | Known TVs, view settings, the lock PIN's hash and email alert settings, including the email password in plain text |
+| `channels.json` | Channel and shortcut buttons for each TV, with the app versions they last worked with |
+| `settings.json` | Known TVs, view settings, schedules, the lock PIN's hash and email alert settings, including the email password in plain text |
 
 Keep `settings.json` private, and out of any shared or public repository.

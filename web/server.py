@@ -37,7 +37,7 @@ STATE_FILE = (Path(os.environ["APPDATA"]) / "TV Remote" if getattr(sys, "frozen"
 CHANNELS_FILE = STATE_FILE.with_name("channels.json")
 SETTINGS_FILE = STATE_FILE.with_name("settings.json")
 settings_lock = threading.Lock()
-GLOBAL_POSTS = {"/api/settings", "/api/lock", "/api/alerts", "/api/alerts/test", "/api/tvs/remove"}
+GLOBAL_POSTS = {"/api/settings", "/api/lock", "/api/alerts", "/api/alerts/test", "/api/tvs/remove", "/api/schedules/save", "/api/schedules/delete"}
 EMAIL_PATTERN = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 ALERT_REPEAT_SECONDS = 30 * 60  # One email per problem per half hour, so a bad day doesn't flood inboxes.
 VIDEO_CHECK_SECONDS = 20
@@ -50,10 +50,18 @@ ECP_PORT = 8060
 MIN_STEP_MS = 300  # Don't replay presses faster than the app's menus can react.
 MAX_STEP_MS = 60000
 MAX_OPEN_MS = 120000
+APP_OPEN_TIMEOUT = 45  # Seconds to wait for the Roku to report an app open before giving up.
 MAX_STEPS = 300
 channels_lock = threading.Lock()
 running = {}  # ip -> threading.Event that stops the sequence playing on that device
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+SCHEDULE_CHECK_SECONDS = 20
+SCHEDULE_GRACE_MINUTES = 3  # A check that runs a little late, or a restart just after the time, still plays it.
+MAX_SCHEDULES = 100
+schedule_runs = set()  # (schedule id, due time) already started, so each time plays once
+schedule_results = {}  # schedule id -> what happened on each TV the last time it ran
+scheduler_lock = threading.Lock()
+scheduler_started = False
 
 # Ignore any system proxy: the TV is always on the local network.
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -268,6 +276,7 @@ def load_settings():
         "pinHash": "",
         "pinSalt": "",
         "alerts": {"provider": "gmail", "emails": [], "host": "", "port": 587, "security": "starttls", "username": "", "password": "", "from": ""},
+        "schedules": [],
     }
     try:
         settings.update(json.loads(SETTINGS_FILE.read_text(encoding="utf-8")))
@@ -451,6 +460,8 @@ def remove_tv(key):
         if key not in settings["removedTvs"]:
             settings["removedTvs"].append(key)
         settings["hiddenApps"].pop(key, None)
+        for schedule in settings["schedules"]:
+            schedule["tvs"] = [k for k in schedule["tvs"] if k != key]
         write_settings(settings)
         remaining = settings["tvs"]
     with channels_lock:
@@ -493,12 +504,46 @@ def device_key(ip):
 
 
 def channels_for(ip):
-    """A device's channels, each listing every device that shares it."""
+    """A device's channels, each listing every device that shares it, and whether its app changed version."""
     channels = load_channels()
-    return [
-        {**channel, "devices": [key for key, items in channels.items() if any(c["id"] == channel["id"] for c in items)]}
-        for channel in channels.get(device_key(ip), [])
-    ]
+    key = device_key(ip)
+    try:
+        versions = {app["id"]: app["version"] for app in apps(ip)}
+    except (TvError, ET.ParseError):
+        versions = {}
+    result = []
+    for channel in channels.get(key, []):
+        known, current = channel.get("appVersions", {}).get(key), versions.get(channel["appId"])
+        result.append({
+            **channel,
+            "devices": [k for k, items in channels.items() if any(c["id"] == channel["id"] for c in items)],
+            "appUpdated": {"from": known, "to": current} if known and current and known != current else None,
+        })
+    return result
+
+
+def app_version(ip, app_id):
+    """The app's version on this TV, or "" if the TV doesn't say."""
+    try:
+        return next((app["version"] for app in apps(ip) if app["id"] == app_id), "")
+    except (TvError, ET.ParseError):
+        return ""
+
+
+def note_working_version(key, channel_id, version):
+    """Remember the app version a button just worked with on a TV, which clears any update warning there."""
+    if not version:
+        return
+    with channels_lock:
+        channels = load_channels()
+        changed = False
+        for items in channels.values():
+            for channel in items:
+                if channel["id"] == channel_id and channel.get("appVersions", {}).get(key) != version:
+                    channel.setdefault("appVersions", {})[key] = version
+                    changed = True
+        if changed:
+            write_channels(channels)
 
 
 def load_channels():
@@ -530,6 +575,10 @@ def clean_channel(data):
                 raise ValueError
             steps.append({"key": key, "delayMs": max(0, min(int(step["delayMs"]), MAX_STEP_MS))})
         open_delay = max(0, min(int(data.get("openDelayMs", 0)), MAX_OPEN_MS))
+        versions = data.get("appVersions") or {}
+        if not isinstance(versions, dict):
+            raise ValueError
+        versions = {str(k)[:64]: str(v)[:32] for k, v in list(versions.items())[:50]}
     except (KeyError, TypeError, ValueError):
         raise TvError("That channel couldn't be saved because its details are invalid.")
     return {
@@ -543,6 +592,7 @@ def clean_channel(data):
         "expectVideo": bool(data.get("expectVideo", True)),
         "isShortcut": bool(data.get("isShortcut")),
         "steps": steps,
+        "appVersions": versions,  # TV key -> the app's version when this button last worked there
     }
 
 
@@ -557,6 +607,7 @@ def tv_has_app(ip, app_id):
 def save_channel(ip, data, tvs=None):
     """Save a channel. tvs is "all", a list of device keys, or None to leave its TVs as they are."""
     key, channel = device_key(ip), clean_channel(data)
+    version = app_version(ip, channel["appId"])
     keep, skipped = None, []
     if tvs is not None:
         if tvs != "all" and not (isinstance(tvs, list) and all(isinstance(k, str) for k in tvs)):
@@ -572,6 +623,10 @@ def save_channel(ip, data, tvs=None):
         channels = load_channels()
         previous = next((c for items in channels.values() for c in items if c["id"] == channel["id"]), None)
         channel["allTvs"] = tvs == "all" if tvs is not None else bool(previous and previous.get("allTvs"))
+        # Saving counts as checking the button on this TV, so its app version here is the one that works.
+        channel["appVersions"] = dict(previous.get("appVersions", {})) if previous else {}
+        if version:
+            channel["appVersions"][key] = version
         # A channel shared between devices is updated on all of them.
         for items in channels.values():
             for index, existing in enumerate(items):
@@ -674,13 +729,31 @@ def reorder_channels(ip, ids):
         write_channels(channels)
 
 
+def wait_for_app(ip, app_id, cancel):
+    """Wait until the Roku reports the app open. False if stopped first, and an error if it never opens."""
+    deadline = time.monotonic() + APP_OPEN_TIMEOUT
+    while True:
+        try:
+            body, _ = ecp(ip, "/query/active-app", timeout=3)
+            app = ET.fromstring(body).find("app")
+            if app is not None and app.get("id") == str(app_id):
+                return True
+        except (TvError, ET.ParseError):
+            pass  # A busy TV can miss a check, so keep trying until the deadline.
+        if time.monotonic() >= deadline:
+            raise TvError(f"The app didn't open within {APP_OPEN_TIMEOUT} seconds.")
+        if cancel.wait(0.5):
+            return False
+
+
 def open_app_fresh(ip, app_id, cancel, reset=False, wait_ms=0):
     """Go home first, so recording and playback both start from the same place.
 
-    Apps resume where they were left. With reset on, a placeholder link makes an
-    app like Frndly go to its home screen and show a "not available" pop-up. OK
-    clears the pop-up, and Up (which stops at the top) puts the highlight on the
-    app's top menu, wherever it landed.
+    Returns once the Roku reports the app open, so the wait for its menus counts
+    from then, however slowly it started. Apps resume where they were left. With
+    reset on, a placeholder link makes an app like Frndly go to its home screen
+    and show a "not available" pop-up. OK clears the pop-up, and Up (which stops
+    at the top) puts the highlight on the app's top menu, wherever it landed.
     """
     press(ip, "Home")
     if cancel.wait(1.5):
@@ -688,9 +761,9 @@ def open_app_fresh(ip, app_id, cancel, reset=False, wait_ms=0):
     path = "/launch/" + urllib.parse.quote(str(app_id), safe="")
     if not reset:
         ecp(ip, path, "POST")
-        return True
+        return wait_for_app(ip, app_id, cancel)
     ecp(ip, path + "?contentId=reset&mediaType=live", "POST")
-    if cancel.wait(wait_ms / 1000):
+    if not wait_for_app(ip, app_id, cancel) or cancel.wait(wait_ms / 1000):
         return False
     press(ip, "Select")
     if cancel.wait(1):
@@ -723,11 +796,16 @@ def play_channel(ip, channel_id):
     channel = next((c for c in load_channels().get(info["key"], []) if c["id"] == channel_id), None)
     if not channel:
         raise TvError("That channel no longer exists.")
+    return play_and_report(ip, info, channel)
+
+
+def play_and_report(ip, info, channel):
+    """Play a channel, emailing the family if it fails or no video starts."""
     cancel = start_sequence(ip)
     try:
         result = run_channel(ip, channel, cancel)
     except TvError as err:
-        report_issue(info["key"], info["name"], f"{channel['name']} failed", f"The button couldn't finish.\n{err}")
+        report_issue(info["key"], info["name"], f"{channel['name']} failed", f"The button couldn't finish.\n{err}" + update_note(ip, info, channel))
         raise
     finally:
         finish_sequence(ip, cancel)
@@ -735,9 +813,28 @@ def play_channel(ip, channel_id):
         report_issue(
             info["key"], info["name"], f"{channel['name']} didn't start",
             f"The presses were sent, but no video started within {VIDEO_CHECK_SECONDS} seconds.\n"
-            f"The app ({channel['appName']}) may have changed, or a prompt may be on screen.",
+            f"The app ({channel['appName']}) may have changed, or a prompt may be on screen." + update_note(ip, info, channel),
         )
+    elif result.get("verified"):
+        note_working_version(info["key"], channel["id"], app_version(ip, channel["appId"]))
     return result
+
+
+def update_note(ip, info, channel):
+    """For alert emails: say so if the app was updated since the button last worked on this TV."""
+    known, current = channel.get("appVersions", {}).get(info["key"]), app_version(ip, channel["appId"])
+    if known and current and known != current:
+        return (f"\n\n{channel['appName']} was updated from version {known} to {current} since this button last worked "
+                "on this TV. The button probably needs recording again.")
+    return ""
+
+
+def something_playing(ip):
+    try:
+        body, _ = ecp(ip, "/query/media-player", timeout=4)
+        return ET.fromstring(body).get("state") in ("play", "buffer")
+    except (TvError, ET.ParseError):
+        return False
 
 
 def video_playing(ip, cancel):
@@ -808,10 +905,175 @@ def status(ip):
 def apps(ip):
     body, _ = ecp(ip, "/query/apps")
     return [
-        {"id": app.get("id"), "name": (app.text or "").strip()}
+        {"id": app.get("id"), "name": (app.text or "").strip(), "version": app.get("version", "")}
         for app in ET.fromstring(body).findall("app")
         if app.get("id") and app.get("type", "appl") == "appl"
     ]
+
+
+def channel_devices(channels, channel_id):
+    return [key for key, items in channels.items() if any(c["id"] == channel_id for c in items)]
+
+
+def due_today(schedule, now):
+    hour, minute = map(int, schedule["time"].split(":"))
+    return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def clean_schedule(data):
+    """Validate a schedule sent by the page: a channel, a time, days (0 is Monday) and TVs that have the channel."""
+    try:
+        hour, minute = (int(part) for part in re.fullmatch(r"(\d{1,2}):(\d{2})", str(data["time"])).groups())
+        days = sorted({int(day) for day in data["days"]})
+        tvs = list(dict.fromkeys(str(key) for key in data["tvs"]))
+        channel_id = str(data["channelId"])[:64]
+        if hour > 23 or minute > 59 or not days or not all(0 <= day <= 6 for day in days) or not 0 < len(tvs) <= 50:
+            raise ValueError
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise TvError("That schedule couldn't be saved. Choose a channel, a time, at least one day and at least one TV.")
+    known = {tv["key"]: tv["name"] for tv in load_settings()["tvs"]}
+    has_channel = channel_devices(load_channels(), channel_id)
+    if not has_channel:
+        raise TvError("That channel no longer exists.")
+    missing = [known.get(key, "A removed TV") for key in tvs if key not in known or key not in has_channel]
+    if missing:
+        raise TvError(f"This channel isn't on {', '.join(missing)}. Add it to that TV first, or choose other TVs.")
+    return {
+        "id": str(data.get("id") or uuid.uuid4().hex)[:64],
+        "channelId": channel_id,
+        "time": f"{hour:02d}:{minute:02d}",
+        "days": days,
+        "tvs": tvs,
+        "skipIfPlaying": bool(data.get("skipIfPlaying", True)),
+        "enabled": bool(data.get("enabled", True)),
+    }
+
+
+def save_schedule(data):
+    if not isinstance(data, dict):
+        raise TvError("Invalid schedule.")
+    schedule = clean_schedule(data)
+    with settings_lock:
+        settings = load_settings()
+        items = settings["schedules"]
+        index = next((i for i, item in enumerate(items) if item["id"] == schedule["id"]), None)
+        if index is None:
+            if len(items) >= MAX_SCHEDULES:
+                raise TvError(f"There can be up to {MAX_SCHEDULES} schedules.")
+            items.append(schedule)
+        else:
+            items[index] = schedule
+        write_settings(settings)
+    # A time that already passed today waits for its next day, rather than playing as soon as it's saved.
+    now = datetime.datetime.now()
+    due = due_today(schedule, now)
+    if due <= now:
+        schedule_runs.add((schedule["id"], due.isoformat()))
+
+
+def delete_schedule(schedule_id):
+    with settings_lock:
+        settings = load_settings()
+        settings["schedules"] = [s for s in settings["schedules"] if s["id"] != schedule_id]
+        write_settings(settings)
+    schedule_results.pop(schedule_id, None)
+
+
+def schedules_view():
+    """Schedules with their last results, plus every channel and the TVs that have it, for the page's editor."""
+    settings = load_settings()
+    channels = load_channels()
+    unique = {c["id"]: c for items in channels.values() for c in items}
+    return {
+        "schedules": [{**s, "lastRun": schedule_results.get(s["id"])} for s in settings["schedules"]],
+        "channels": [
+            {"id": c["id"], "name": c["name"], "appName": c["appName"], "isShortcut": c.get("isShortcut", False),
+             "devices": channel_devices(channels, c["id"])}
+            for c in unique.values()
+        ],
+        "tvs": [{"key": tv["key"], "name": tv["name"]} for tv in settings["tvs"]],
+    }
+
+
+def scheduled_play(tv, channel, schedule):
+    """Play a scheduled channel on one TV, unless that would interrupt someone. Returns what happened."""
+    if not channel:
+        return "Skipped: the channel isn't on this TV anymore"
+    try:
+        info = device_info(tv["ip"])
+    except (TvError, ET.ParseError):
+        return "Skipped: the TV didn't answer, so it may be off"
+    if info["key"] != tv["key"]:
+        return "Skipped: the TV wasn't at its usual address"
+    ip = info["ip"]
+    if info["isTv"] and info["powerMode"] != "PowerOn":
+        return "Skipped: the TV is off"
+    if running.get(ip):
+        return "Skipped: another button was running"
+    if schedule["skipIfPlaying"] and something_playing(ip):
+        return "Skipped: something was already playing"
+    try:
+        result = play_and_report(ip, info, channel)
+    except TvError as err:
+        return f"Failed: {err}"
+    if result.get("stopped"):
+        return "Stopped before it finished"
+    if result.get("verified") is False:
+        return "Played, but no video started"
+    return "Played"
+
+
+def run_schedule(schedule, due):
+    """Play a schedule on all its TVs at once."""
+    tvs = {tv["key"]: tv for tv in load_settings()["tvs"]}
+    channels = load_channels()
+    results = []
+
+    def one(key):
+        tv = tvs.get(key)
+        if tv:
+            channel = next((c for c in channels.get(key, []) if c["id"] == schedule["channelId"]), None)
+            results.append({"tv": tv["name"], "result": scheduled_play(tv, channel, schedule)})
+
+    threads = [threading.Thread(target=one, args=(key,), daemon=True) for key in schedule["tvs"]]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    schedule_results[schedule["id"]] = {"at": due.strftime("%Y-%m-%d %H:%M"), "results": sorted(results, key=lambda r: r["tv"])}
+
+
+def run_due_schedules(now):
+    for key in [k for k in schedule_runs if k[1] < (now - datetime.timedelta(days=1)).isoformat()]:
+        schedule_runs.discard(key)
+    for schedule in load_settings()["schedules"]:
+        if not schedule.get("enabled", True) or not schedule["tvs"]:
+            continue
+        due = due_today(schedule, now)
+        if due.weekday() not in schedule["days"] or not due <= now < due + datetime.timedelta(minutes=SCHEDULE_GRACE_MINUTES):
+            continue
+        run_key = (schedule["id"], due.isoformat())
+        if run_key in schedule_runs:
+            continue
+        schedule_runs.add(run_key)
+        threading.Thread(target=run_schedule, args=(schedule, due), daemon=True).start()
+
+
+def scheduler_loop():
+    while True:
+        try:
+            run_due_schedules(datetime.datetime.now())
+        except Exception:  # Keep the scheduler alive whatever a single check runs into, like a half-written file.
+            pass
+        time.sleep(SCHEDULE_CHECK_SECONDS)
+
+
+def start_scheduler():
+    global scheduler_started
+    with scheduler_lock:
+        if not scheduler_started:
+            scheduler_started = True
+            threading.Thread(target=scheduler_loop, daemon=True).start()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -868,6 +1130,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"devices": devices})
             elif url.path == "/api/settings":
                 self.send_json(public_settings())
+            elif url.path == "/api/schedules":
+                self.send_json(schedules_view())
             elif url.path == "/api/status":
                 self.send_json(status(check_ip(query.get("ip"))))
             elif url.path == "/api/apps":
@@ -905,6 +1169,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise TvError("That TV isn't in the list.")
                 remove_tv(key)
                 return self.send_json({**public_settings(), "saved": load_saved()})
+            elif self.path in ("/api/schedules/save", "/api/schedules/delete"):
+                if self.path.endswith("save"):
+                    save_schedule(data.get("schedule"))
+                else:
+                    delete_schedule(data.get("id"))
+                return self.send_json(schedules_view())
             elif self.path == "/api/alerts/test":
                 send_email(
                     load_settings()["alerts"],
@@ -983,6 +1253,10 @@ class Server(ThreadingHTTPServer):
     # On Windows, address reuse would let two servers silently share a port.
     allow_reuse_address = os.name != "nt"
     daemon_threads = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        start_scheduler()  # Schedules play while the website or Windows app is running.
 
 
 def main():

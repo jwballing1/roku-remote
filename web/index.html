@@ -105,6 +105,8 @@
   button.channel:active { background: var(--key-active); }
   .channel strong { display: block; font-weight: 600; font-size: 15px; }
   .channel small { display: block; color: var(--muted); font-size: 12px; }
+  .channel small.update-warning { margin-top: 4px; color: var(--off); }
+  body.locked .channel small.update-warning { display: none; }
   .channel.add { background: none; border: 1px dashed var(--line); color: var(--muted); font-size: 14px; }
   .tv-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
   .tvs-edit-note { margin: 0 0 12px; }
@@ -192,6 +194,27 @@
   .palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
   .palette .key { min-height: 44px; }
   .palette .ok-add { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+  .schedules { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .schedule { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: 10px 12px; background: var(--key); border-radius: 10px; }
+  .schedule.off { opacity: .6; }
+  .schedule > input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); grid-row: span 2; }
+  .schedule strong { font-weight: 600; }
+  .schedule small { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .schedule .schedule-actions { grid-column: 2; display: flex; gap: 4px; margin-left: -8px; }
+  .schedule .danger { color: var(--down); }
+  .schedule-form { display: grid; gap: 10px; margin-top: 12px; }
+  .schedule-form label { margin: 0; color: var(--muted); }
+  .schedule-form .field { display: block; margin-top: 4px; }
+  .schedule-form .check-row { display: flex; align-items: flex-start; gap: 10px; color: var(--text); }
+  .schedule-form .tv-picker label { color: var(--text); }
+  .day-picker { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .day-picker label { margin: 0; }
+  .day-picker input { position: absolute; opacity: 0; pointer-events: none; }
+  .day-picker span { display: flex; align-items: center; justify-content: center; min-height: 40px; background: var(--key); border-radius: 8px; color: var(--text); font-size: 14px; cursor: pointer; }
+  .day-picker input:checked + span { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .day-picker input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .day-presets { display: flex; flex-wrap: wrap; margin-top: 4px; margin-left: -8px; }
 
   #banner {
     position: sticky; top: 8px; z-index: 5; margin-bottom: 12px; padding: 12px;
@@ -360,7 +383,7 @@
               </details>
             </div>
             <div class="delay-row">
-              <label>Wait for app to open (seconds)
+              <label>Wait after the app opens (seconds)
                 <input id="open-delay" class="field" type="number" min="0" max="120" step="any" value="8" required>
               </label>
               <label>Delay between presses (seconds)
@@ -410,6 +433,45 @@
               <button class="primary" id="draft-try">Save and try</button>
               <button id="draft-record" class="text-btn" type="button">Record on TV instead</button>
               <button id="add-cancel" class="text-btn" type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
+        <div class="panel hide-recording hide-channels-only" id="schedules-panel">
+          <div class="panel-head">
+            <h2>Schedules</h2>
+            <button id="schedule-add" class="link" type="button">+ Add schedule</button>
+          </div>
+          <p id="schedules-empty" class="muted">Play a channel automatically at set times, like the news every morning. Schedules play while TV Remote is running on this computer.</p>
+          <ul id="schedules" class="schedules"></ul>
+          <form id="schedule-form" class="schedule-form" hidden>
+            <label>Channel
+              <select id="schedule-channel" class="field" required></select>
+            </label>
+            <label>Time
+              <input id="schedule-time" class="field" type="time" required>
+            </label>
+            <div>
+              <span class="field-label">Days</span>
+              <div id="schedule-days" class="day-picker" role="group" aria-label="Days"></div>
+              <div class="day-presets">
+                <button class="link" type="button" data-days="0,1,2,3,4,5,6">Every day</button>
+                <button class="link" type="button" data-days="0,1,2,3,4">Weekdays</button>
+                <button class="link" type="button" data-days="5,6">Weekends</button>
+              </div>
+            </div>
+            <div>
+              <span class="field-label">TVs</span>
+              <div id="schedule-tvs" class="tv-picker" role="group" aria-label="TVs"></div>
+            </div>
+            <label class="check-row">
+              <input id="schedule-skip" type="checkbox" checked>
+              <span>Skip if something is already playing
+                <small>So it never interrupts a show. TVs that are off, or already running a button, are always skipped.</small>
+              </span>
+            </label>
+            <div class="form-buttons">
+              <button class="primary">Save schedule</button>
+              <button id="schedule-cancel" class="text-btn" type="button">Cancel</button>
             </div>
           </form>
         </div>
@@ -557,7 +619,7 @@ let alertsEnabled = false;
 let alertsFormEdited = false;
 let unlockPin = '';
 let draft = null;         // The channel open in the step editor: { id, steps }
-const DEFAULT_OPEN_MS = 9000;
+const DEFAULT_OPEN_MS = 8000;  // Counted from when the Roku reports the app open, so it covers the app loading its menus.
 const RESET_APPS = new Set(['298229']);  // Frndly TV: the home-screen reset is tested and works.
 let recording = null;     // { id, name, appId, appName, steps, last, opening }
 let playing = false;
@@ -786,6 +848,7 @@ function setState(kind, text) {
 async function refresh() {
   if (!tv) return;
   const ip = tv.ip;
+  if (!document.body.classList.contains('channels-only')) loadSchedules();  // Picks up last-run results and channel changes.
   try {
     const status = await api('/api/status?ip=' + encodeURIComponent(ip));
     if (!tv || tv.ip !== ip) return;
@@ -938,6 +1001,13 @@ function channelLabel(parent, channel) {
   const app = document.createElement('small');
   app.textContent = channel.appName + (channel.devices?.length > 1 ? ` · ${channel.devices.length} TVs` : '');
   parent.append(name, app);
+  if (channel.appUpdated) {
+    const warning = document.createElement('small');
+    warning.className = 'update-warning';
+    warning.textContent = `${channel.appName} updated. Record again if it misses.`;
+    warning.title = `Version ${channel.appUpdated.from} when it last worked on this TV, now ${channel.appUpdated.to}. Playing it successfully clears this.`;
+    parent.append(warning);
+  }
 }
 
 function channelButton(channel) {
@@ -1361,6 +1431,7 @@ async function playChannel(channel) {
   document.body.classList.remove('is-busy');
   $('banner').hidden = true;
   refresh();
+  if (channel.appUpdated) loadChannels(tv.ip);  // A play that worked clears the app update warning.
 }
 
 $('apps-edit').addEventListener('click', () => {
@@ -1376,6 +1447,235 @@ document.querySelector('.start-over').addEventListener('click', async () => {
     toast('Back at the start. Choose a channel.', true);
   } catch (err) {
     toast(isLocked() ? "That didn't work. Check that the TV is on, then try again." : err.message);
+  }
+});
+
+/* Schedules: play a channel at set times, on one or more TVs. The server runs them. */
+const DAY_ORDER = [6, 0, 1, 2, 3, 4, 5];  // Shown Sunday first. The server counts Monday as 0.
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+let scheduleData = { schedules: [], channels: [], tvs: [] };
+let scheduleDataJson = '';
+let scheduleDraft = null;  // { id, enabled, tvs } while the form is open
+
+function setScheduleData(data) {
+  scheduleDataJson = JSON.stringify(data);
+  scheduleData = data;
+  renderSchedules();
+}
+
+async function loadSchedules() {
+  try {
+    const data = await api('/api/schedules');
+    // Redraw only on changes, so a half-tapped Delete isn't reset by the regular refresh.
+    if (JSON.stringify(data) !== scheduleDataJson) setScheduleData(data);
+  } catch {}
+}
+
+function formatTime(time) {
+  const [hour, minute] = time.split(':').map(Number);
+  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatDays(days) {
+  const key = days.join(',');
+  if (key === '0,1,2,3,4,5,6') return 'Every day';
+  if (key === '0,1,2,3,4') return 'Weekdays';
+  if (key === '5,6') return 'Weekends';
+  return DAY_ORDER.filter((day) => days.includes(day)).map((day) => DAY_NAMES[day]).join(', ');
+}
+
+function formatLastRun(lastRun) {
+  const [date, time] = lastRun.at.split(' ');
+  const now = new Date();
+  const today = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, '0')).join('-');
+  const when = (date === today ? 'Today' : date) + ' ' + formatTime(time);
+  const results = lastRun.results.map((r) => `${r.tv}: ${r.result}`).join('. ');
+  return `Last run ${when}. ${results || 'No TVs to play on.'}`;
+}
+
+function scheduleTvName(key) {
+  return scheduleData.tvs.find((known) => known.key === key)?.name || 'A removed TV';
+}
+
+function renderSchedules() {
+  const { schedules } = scheduleData;
+  const editing = Boolean(scheduleDraft);
+  $('schedules-empty').hidden = schedules.length > 0 || editing;
+  $('schedule-add').hidden = editing;
+  $('schedules').hidden = editing;
+  $('schedules').replaceChildren(...schedules.map((schedule) => {
+    const channel = scheduleData.channels.find((c) => c.id === schedule.channelId);
+    const item = document.createElement('li');
+    item.className = 'schedule' + (schedule.enabled ? '' : ' off');
+    const toggle = document.createElement('input');
+    toggle.type = 'checkbox';
+    toggle.checked = schedule.enabled;
+    toggle.setAttribute('aria-label', 'Schedule on');
+    toggle.title = schedule.enabled ? 'On. Uncheck to pause this schedule.' : 'Off. Check to turn it on.';
+    toggle.addEventListener('change', async () => {
+      try {
+        setScheduleData(await api('/api/schedules/save', { schedule: { ...schedule, enabled: toggle.checked } }));
+      } catch (err) {
+        toggle.checked = !toggle.checked;
+        toast(err.message);
+      }
+    });
+    const text = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = `${formatTime(schedule.time)} · ${formatDays(schedule.days)}${schedule.enabled ? '' : ' · Off'}`;
+    const what = document.createElement('small');
+    what.textContent = `${channel ? channel.name : 'A deleted channel'} on ${schedule.tvs.map(scheduleTvName).join(', ') || 'no TVs'}`;
+    text.append(title, what);
+    if (schedule.lastRun) {
+      const last = document.createElement('small');
+      last.textContent = formatLastRun(schedule.lastRun);
+      text.append(last);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'schedule-actions';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'link';
+    edit.textContent = 'Edit';
+    edit.addEventListener('click', () => openScheduleForm(schedule));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'link danger';
+    remove.textContent = 'Delete';
+    let confirming = false;
+    remove.addEventListener('click', async () => {
+      if (!confirming) { confirming = true; remove.textContent = 'Tap again to delete'; return; }
+      try {
+        setScheduleData(await api('/api/schedules/delete', { id: schedule.id }));
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+    actions.append(edit, remove);
+    item.append(toggle, text, actions);
+    return item;
+  }));
+}
+
+function scheduleChannel() {
+  return scheduleData.channels.find((c) => c.id === $('schedule-channel').value);
+}
+
+function scheduleEligibleTvs() {
+  const channel = scheduleChannel();
+  return scheduleData.tvs.filter((known) => channel?.devices.includes(known.key));
+}
+
+function renderScheduleTvs() {
+  const eligible = new Set(scheduleEligibleTvs().map((known) => known.key));
+  const option = (text, checked, disabled, onChange) => {
+    const label = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = checked;
+    box.disabled = disabled;
+    box.addEventListener('change', () => onChange(box.checked));
+    label.append(box, ' ' + text);
+    return [label, box];
+  };
+  const rows = scheduleData.tvs.map((known) => {
+    const has = eligible.has(known.key);
+    return option(known.name + (has ? '' : " (doesn't have this channel)"), has && scheduleDraft.tvs.has(known.key), !has, (checked) => {
+      if (checked) scheduleDraft.tvs.add(known.key); else scheduleDraft.tvs.delete(known.key);
+      renderScheduleTvs();
+    })[0];
+  });
+  if (eligible.size > 1) {
+    const chosen = [...eligible].filter((key) => scheduleDraft.tvs.has(key)).length;
+    const [all, box] = option('Select all', chosen === eligible.size, false, (checked) => {
+      scheduleDraft.tvs = checked ? new Set(eligible) : new Set();
+      renderScheduleTvs();
+    });
+    box.indeterminate = chosen > 0 && chosen < eligible.size;
+    all.classList.add('all-option');
+    rows.unshift(all);
+  }
+  $('schedule-tvs').replaceChildren(...rows);
+}
+
+async function openScheduleForm(schedule) {
+  await loadSchedules();
+  const usable = scheduleData.channels
+    .filter((c) => c.devices.some((key) => scheduleData.tvs.some((known) => known.key === key)))
+    .sort((a, b) => Number(a.isShortcut) - Number(b.isShortcut) || a.name.localeCompare(b.name));
+  if (!usable.length) {
+    toast('Add a channel button first, then schedule it.');
+    return;
+  }
+  scheduleDraft = { id: schedule?.id, enabled: schedule ? schedule.enabled : true, tvs: new Set(schedule?.tvs || []) };
+  $('schedule-channel').replaceChildren(...usable.map((c) => {
+    const option = document.createElement('option');
+    option.value = c.id;
+    option.textContent = `${c.name} (${c.appName}${c.isShortcut ? ', shortcut' : ''})`;
+    return option;
+  }));
+  $('schedule-channel').value = usable.some((c) => c.id === schedule?.channelId) ? schedule.channelId : usable[0].id;
+  if (!schedule) scheduleDraft.tvs = new Set(scheduleEligibleTvs().map((known) => known.key));
+  $('schedule-time').value = schedule?.time || '';
+  $('schedule-days').replaceChildren(...DAY_ORDER.map((day) => {
+    const label = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = day;
+    box.checked = schedule ? schedule.days.includes(day) : true;
+    const name = document.createElement('span');
+    name.textContent = DAY_NAMES[day];
+    label.append(box, name);
+    return label;
+  }));
+  $('schedule-skip').checked = schedule ? schedule.skipIfPlaying : true;
+  renderScheduleTvs();
+  $('schedule-form').hidden = false;
+  renderSchedules();
+  $('schedule-time').focus();
+}
+
+function closeScheduleForm() {
+  scheduleDraft = null;
+  $('schedule-form').hidden = true;
+  renderSchedules();
+}
+
+$('schedule-add').addEventListener('click', () => openScheduleForm(null));
+$('schedule-cancel').addEventListener('click', closeScheduleForm);
+$('schedule-channel').addEventListener('change', () => {
+  // Keep the TVs that have the new channel, or offer all of them if none do.
+  const eligible = scheduleEligibleTvs().map((known) => known.key);
+  const kept = eligible.filter((key) => scheduleDraft.tvs.has(key));
+  scheduleDraft.tvs = new Set(kept.length ? kept : eligible);
+  renderScheduleTvs();
+});
+document.querySelectorAll('[data-days]').forEach((button) => button.addEventListener('click', () => {
+  const days = button.dataset.days.split(',');
+  document.querySelectorAll('#schedule-days input').forEach((box) => { box.checked = days.includes(box.value); });
+}));
+$('schedule-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const days = [...document.querySelectorAll('#schedule-days input:checked')].map((box) => Number(box.value));
+  const tvs = scheduleEligibleTvs().map((known) => known.key).filter((key) => scheduleDraft.tvs.has(key));
+  if (!days.length) { toast('Choose at least one day.'); return; }
+  if (!tvs.length) { toast('Choose at least one TV.'); return; }
+  try {
+    const data = await api('/api/schedules/save', { schedule: {
+      id: scheduleDraft.id,
+      channelId: $('schedule-channel').value,
+      time: $('schedule-time').value,
+      days,
+      tvs,
+      skipIfPlaying: $('schedule-skip').checked,
+      enabled: scheduleDraft.enabled,
+    } });
+    scheduleDraft = null;
+    $('schedule-form').hidden = true;
+    setScheduleData(data);
+    toast('Schedule saved.', true);
+  } catch (err) {
+    toast(err.message);
   }
 });
 
