@@ -255,6 +255,21 @@ most one email per problem every 30 minutes.
 
 Alerts can't report that TV Remote itself, the computer running it, or the internet is down.
 
+### Family account
+If your family runs a TV Remote family hub (see [hub/README.md](../hub/README.md)), invited family
+members can use this remote from anywhere. They can play channels, press buttons, and change buttons
+and schedules.
+
+1. Under **Family account**, enter the hub's address, and choose **Connect**.
+2. A 6-digit code appears. Someone signed in to the hub enters it under **Link a home**, within 10
+   minutes.
+3. TV Remote shows **Connected**. The hub's owners can then invite other family members.
+
+While a family member is helping, a green note at the top of the screen says who, and what they did,
+like **"Nephew is helping: Played MeTv on Den"**. To end remote access, choose **Disconnect**.
+
+This computer has to stay on, with TV Remote running, for family to reach it.
+
 ---
 
 ## Troubleshooting

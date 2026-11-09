@@ -4,6 +4,14 @@ channels.json
 settings.json
 *.tmp
 
+# Family hub: its private settings (an email password), accounts and certificates
+hub/.env
+hub/Caddyfile
+hub/data/
+hub/caddy-data/
+# Exported hub images, for importing on the NAS
+*.tar
+
 # Build output
 .venv/
 build/

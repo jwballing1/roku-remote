@@ -1,0 +1,9 @@
+# Only the files the hub image needs. This keeps saved settings (which can hold passwords) and
+# large files out of Docker builds.
+*
+!hub/hub.py
+!hub/portal.html
+!hub/setup.html
+!hub/start.sh
+!web/index.html
+!web/relay_rules.py

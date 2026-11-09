@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14151a">
+<title>Family Hub Setup</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14151a; --panel: #1e2027; --line: #363a47;
+    --text: #f2f3f7; --muted: #a3a8b8; --accent: #8f7bff; --accent-ink: #14112b;
+    --on: #4ade80; --warn: #f59e0b; --down: #f87171;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, input, textarea { font: inherit; color: inherit; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .panel { background: var(--panel); border-radius: 16px; padding: 16px; margin-top: 16px; }
+  .panel h2 { margin: 0 0 6px; font-size: 16px; }
+  .muted { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  .muted a { color: var(--accent); }
+  label { display: block; margin: 0 0 14px; font-size: 14px; color: var(--muted); }
+  .field { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; color: var(--text); }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 10px; }
+  .primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 10px 18px; font-weight: 600; cursor: pointer; }
+  .primary:disabled { opacity: .6; }
+  .text-btn { background: none; border: 1px solid var(--line); border-radius: 10px; padding: 9px 14px; cursor: pointer; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .status { display: grid; gap: 8px; }
+  .status div { display: flex; gap: 10px; align-items: flex-start; }
+  .dot { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--on); } .dot.warn { background: var(--warn); } .dot.down { background: var(--down); }
+  .address { font-size: 18px; font-weight: 600; word-break: break-all; }
+  ol { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+  ol li { margin-bottom: 6px; }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 520px; margin: 0 auto; padding: 12px 14px; border-radius: 10px; background: #3b1d22; border: 1px solid #7a2f38; font-size: 14px; }
+  #toast.info { background: var(--panel); border-color: var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TV Remote family hub setup</h1>
+  <p class="muted">This page only works on your home network. Never forward its port on the router.</p>
+
+  <section id="status-panel" class="panel" hidden>
+    <h2>Status</h2>
+    <div class="status">
+      <div><span class="dot on"></span><span>Family members go to<br><span id="address" class="address"></span></span></div>
+      <div><span id="https-dot" class="dot"></span><span id="https-text"></span></div>
+    </div>
+  </section>
+
+  <form id="form" class="panel" autocomplete="off">
+    <h2 id="form-title">Settings</h2>
+    <p id="first-note" class="muted" hidden>Fill these in once. You can change them here later with your setup password.</p>
+
+    <label>Your No-IP name
+      <input id="name" class="field" placeholder="yourname.ddns.net" required>
+    </label>
+    <label>Port family members will use
+      <input id="port" class="field" inputmode="numeric" value="8443" required>
+    </label>
+    <p class="muted">Forward this port, and port 80, from your router to the NAS. The container needs the same ports.</p>
+    <h2>Your account</h2>
+    <p class="muted">You sign in to the hub with this email and password, from anywhere. Family members get their own
+      accounts through invite links you create there. If you forget your password, set a new one here.</p>
+    <label>Your name, shown on the TV screen when you help
+      <input id="owner-name" class="field" placeholder="Jim" autocomplete="name" required>
+    </label>
+    <label>Your email
+      <input id="owner-email" class="field" type="email" placeholder="you@example.com" autocomplete="email" required>
+    </label>
+    <label><span id="owner-password-label">Your password, at least 8 characters</span>
+      <input id="owner-password" class="field" type="password" autocomplete="new-password">
+    </label>
+
+    <h2>Setup password</h2>
+    <p class="muted">Protects this page. It's separate from your account password.</p>
+    <div id="current-row">
+      <label>Current setup password, to save changes
+        <input id="current" class="field" type="password" autocomplete="current-password">
+      </label>
+    </div>
+    <label><span id="new-label">Choose a setup password, at least 8 characters</span>
+      <input id="new" class="field" type="password" autocomplete="new-password">
+    </label>
+
+    <div class="buttons">
+      <button class="primary" id="save">Save and start</button>
+    </div>
+  </form>
+
+  <section class="panel">
+    <h2>After saving</h2>
+    <ol>
+      <li>On your router, forward the port above and port 80 (TCP) to the NAS.</li>
+      <li>Wait for <strong>HTTPS: ready</strong> above. It can take a minute.</li>
+      <li>On your phone with Wi-Fi off, open the address above, and sign in with your email and password.</li>
+    </ol>
+  </section>
+</div>
+<div id="toast" role="alert" hidden></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let toastTimer, status = null, edited = false;
+
+function toast(message, info = false) {
+  $('toast').textContent = message;
+  $('toast').classList.toggle('info', info);
+  $('toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').hidden = true; }, info ? 4000 : 9000);
+}
+
+async function api(path, body) {
+  const response = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+  return data;
+}
+
+function show(data) {
+  status = data;
+  $('status-panel').hidden = !data.configured;
+  $('first-note').hidden = data.configured;
+  $('current-row').hidden = !data.configured;
+  $('save').textContent = data.configured ? 'Save changes' : 'Save and start';
+  $('new-label').textContent = data.configured ? 'New setup password (leave blank to keep it)' : 'Choose a setup password, at least 8 characters';
+  $('owner-password-label').textContent = data.ownerHasPassword
+    ? 'New password for your account (leave blank to keep it)' : 'Choose a password for your account, at least 8 characters';
+  if (!edited) {
+    $('name').value = data.name;
+    $('port').value = data.port;
+    $('owner-name').value = data.ownerName;
+    $('owner-email').value = data.ownerEmail;
+  }
+  if (data.configured) {
+    $('address').textContent = data.publicUrl;
+    const https = data.https;
+    let kind = 'warn', text = 'HTTPS: starting…';
+    if (!https.managed) { kind = 'on'; text = 'HTTPS is handled outside this container.'; }
+    else if (https.running && https.certificate) { kind = 'on'; text = 'HTTPS: ready, with a valid certificate.'; }
+    else if (https.problem) { kind = 'down'; text = `HTTPS: no certificate yet. ${https.problem} Check that the router forwards port 80 and port ${data.port} to the NAS, and that your No-IP name points at this house.`; }
+    else if (https.running) { text = 'HTTPS: getting a certificate. This can take a minute.'; }
+    else { kind = 'down'; text = 'HTTPS: not running.'; }
+    $('https-dot').className = 'dot ' + kind;
+    $('https-text').textContent = text;
+  }
+}
+
+async function load() {
+  try { show(await api('/api/status')); } catch (err) { toast(err.message); }
+}
+
+document.querySelectorAll('#form input').forEach((input) => input.addEventListener('input', () => { edited = true; }));
+
+$('form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  $('save').disabled = true;
+  try {
+    const data = await api('/api/save', {
+      name: $('name').value, port: $('port').value,
+      ownerName: $('owner-name').value, ownerEmail: $('owner-email').value, ownerPassword: $('owner-password').value,
+      currentPassword: $('current').value, newPassword: $('new').value,
+    });
+    edited = false;
+    $('owner-password').value = $('current').value = $('new').value = '';
+    show(data);
+    toast('Saved.', true);
+  } catch (err) {
+    toast(err.message);
+  }
+  $('save').disabled = false;
+});
+
+load();
+setInterval(() => { if (!document.hidden && status?.configured) load(); }, 5000);
+</script>
+</body>
+</html>

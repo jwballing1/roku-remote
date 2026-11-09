@@ -1,0 +1,12 @@
+# Project file for the all-in-one tvremote-hub image (built by build-image.ps1 and imported on the NAS).
+# No settings here: open http://<NAS address>:8080 on the home network after it starts.
+services:
+  hub:
+    image: tvremote-hub
+    restart: unless-stopped
+    ports:
+      - "8443:8443"   # The family hub over HTTPS. The router forwards external 8443 here.
+      - "8088:80"     # Certificate checks. The router forwards external 80 here. (UGOS uses the NAS's own port 80.)
+      - "8080:8080"   # The setup page, for the home network only. Never forward this on the router.
+    volumes:
+      - ./data:/data  # Settings, accounts, homes and certificates

@@ -5,6 +5,7 @@ Browsers can't do SSDP discovery or read ECP responses, so this server serves
 the page and relays its requests to the TV on port 8060.
 """
 import argparse
+import base64
 import datetime
 import email.message
 import hashlib
@@ -30,6 +31,8 @@ import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import relay_rules
+
 HERE = Path(__file__).resolve().parent
 # The packaged Windows app unpacks to a temp folder, so its saved TV goes in AppData.
 PAGE = Path(getattr(sys, "_MEIPASS", HERE)) / "index.html"
@@ -37,7 +40,8 @@ STATE_FILE = (Path(os.environ["APPDATA"]) / "TV Remote" if getattr(sys, "frozen"
 CHANNELS_FILE = STATE_FILE.with_name("channels.json")
 SETTINGS_FILE = STATE_FILE.with_name("settings.json")
 settings_lock = threading.Lock()
-GLOBAL_POSTS = {"/api/settings", "/api/lock", "/api/alerts", "/api/alerts/test", "/api/tvs/remove", "/api/schedules/save", "/api/schedules/delete"}
+GLOBAL_POSTS = {"/api/settings", "/api/lock", "/api/alerts", "/api/alerts/test", "/api/tvs/remove", "/api/schedules/save",
+                "/api/schedules/delete", "/api/family/connect", "/api/family/disconnect"}
 EMAIL_PATTERN = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 ALERT_REPEAT_SECONDS = 30 * 60  # One email per problem per half hour, so a bad day doesn't flood inboxes.
 VIDEO_CHECK_SECONDS = 20
@@ -62,6 +66,13 @@ schedule_runs = set()  # (schedule id, due time) already started, so each time p
 schedule_results = {}  # schedule id -> what happened on each TV the last time it ran
 scheduler_lock = threading.Lock()
 scheduler_started = False
+FAMILY_POLL_TIMEOUT = 40      # The hub answers within 25 seconds when there's no work, so this allows for slow networks.
+HELPING_SECONDS = 20          # How long "is helping" shows on screens here after a family member does something
+relay_secret = secrets.token_hex(16)  # Proves a request to this server came from the family connection, not a browser.
+helping = {}                  # The latest thing a family member did remotely: {"name", "text", "at"}
+family_state = {"status": "", "pairing": None, "generation": 0, "port": None}
+family_lock = threading.Lock()
+family_wake = threading.Event()  # Cuts a retry wait short when the connection is turned off.
 
 # Ignore any system proxy: the TV is always on the local network.
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -277,6 +288,7 @@ def load_settings():
         "pinSalt": "",
         "alerts": {"provider": "gmail", "emails": [], "host": "", "port": 587, "security": "starttls", "username": "", "password": "", "from": ""},
         "schedules": [],
+        "family": {},  # Family hub link: hubUrl, homeId, homeName and deviceToken
     }
     try:
         settings.update(json.loads(SETTINGS_FILE.read_text(encoding="utf-8")))
@@ -290,6 +302,17 @@ def write_settings(settings):
     temp = SETTINGS_FILE.with_suffix(".tmp")
     temp.write_text(json.dumps(settings, indent=2), encoding="utf-8")
     os.replace(temp, SETTINGS_FILE)
+    note_change()
+
+
+# Goes up whenever settings or channels are saved, so every open screen, here or through the
+# family hub, can tell it should reload them. It starts from the time, so a restart counts as a change.
+data_version = int(time.time())
+
+
+def note_change():
+    global data_version
+    data_version += 1
 
 
 def public_settings():
@@ -301,6 +324,15 @@ def public_settings():
     alerts["hasPassword"] = bool(alerts.pop("password", ""))
     alerts["lastStatus"] = last_alert_status
     settings["alerts"] = alerts
+    family = settings["family"]
+    pairing = family_state["pairing"]
+    settings["family"] = {
+        "connected": bool(family.get("deviceToken")),
+        "hubUrl": family.get("hubUrl", ""),
+        "homeName": family.get("homeName", ""),
+        "status": family_state["status"],
+        "pairing": {"code": pairing["code"], "hubUrl": pairing["hubUrl"], "secondsLeft": max(0, int(pairing["expires"] - time.time()))} if pairing else None,
+    }
     return settings
 
 
@@ -320,7 +352,8 @@ def verify_pin(pin):
         raise TvError("That PIN isn't right.")
 
 
-def lock_action(action, pin):
+def lock_action(action, pin, remote_owner=False):
+    """remote_owner: an owner signed in to the family hub can turn the lock off without the PIN."""
     if action == "verify":
         verify_pin(pin)
         return
@@ -333,7 +366,8 @@ def lock_action(action, pin):
             salt = secrets.token_hex(16)
             settings.update(locked=True, pinSalt=salt, pinHash=pin_hash(pin, salt))
         elif action == "off":
-            verify_pin(pin)
+            if not remote_owner:
+                verify_pin(pin)
             settings.update(locked=False, pinSalt="", pinHash="")
         else:
             raise TvError("Invalid lock request.")
@@ -558,6 +592,7 @@ def write_channels(channels):
     temp = CHANNELS_FILE.with_suffix(".tmp")
     temp.write_text(json.dumps(channels, indent=2), encoding="utf-8")
     os.replace(temp, CHANNELS_FILE)
+    note_change()
 
 
 def clean_channel(data):
@@ -1076,16 +1111,239 @@ def start_scheduler():
             threading.Thread(target=scheduler_loop, daemon=True).start()
 
 
+# ----- Family account: lets family members use this TV Remote from anywhere, through a family hub -----
+
+class HubRejected(Exception):
+    """The hub doesn't recognize this home any more, for example because an owner removed it."""
+
+
+def clean_hub_url(url):
+    url = str(url or "").strip().rstrip("/")
+    parts = urllib.parse.urlsplit(url)
+    # Plain http is only for a hub on this same computer, while testing.
+    if not parts.hostname or not (parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1"))):
+        raise TvError("Enter the family hub's address, starting with https://")
+    if parts.query or parts.fragment or parts.username:
+        raise TvError("Enter just the family hub's address, like https://example.ddns.net:8443")
+    return url
+
+
+def hub_request(url, method="GET", data=None, token=None, timeout=15):
+    headers = {"Content-Type": "application/json", "User-Agent": "TVRemote"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    body = json.dumps(data).encode() if data is not None else None
+    request = urllib.request.Request(url, data=body, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as err:
+        if err.code == 401:
+            raise HubRejected()
+        try:
+            message = json.loads(err.read()).get("error")
+        except (ValueError, OSError, AttributeError):
+            message = None
+        raise TvError(message or f"The family hub returned an error (HTTP {err.code}).")
+    except (OSError, ValueError, http.client.HTTPException) as err:
+        raise TvError(f"Couldn't reach the family hub: {getattr(err, 'reason', err)}")
+
+
+def save_family(family):
+    with settings_lock:
+        settings = load_settings()
+        settings["family"] = family
+        write_settings(settings)
+
+
+def family_connect(hub_url):
+    """Ask the hub for a code to show here. An owner enters it on the hub's website to link this home."""
+    hub_url = clean_hub_url(hub_url)
+    if load_settings()["family"].get("deviceToken"):
+        raise TvError("This home is already connected. Disconnect it first.")
+    reply = hub_request(hub_url + "/hub/pair/start", "POST", {})
+    with family_lock:
+        family_state["generation"] += 1
+        generation = family_state["generation"]
+        family_state["pairing"] = {"code": reply["code"], "hubUrl": hub_url, "expires": time.time() + int(reply["expiresIn"])}
+        family_state["status"] = ""
+    threading.Thread(target=wait_for_link, args=(hub_url, reply, generation), daemon=True).start()
+
+
+def wait_for_link(hub_url, pairing, generation):
+    """Check every few seconds whether someone entered the code, until it expires or is cancelled."""
+    expires = time.time() + int(pairing["expiresIn"])
+    while family_state["generation"] == generation:
+        if time.time() > expires + 10:
+            with family_lock:
+                family_state["pairing"] = None
+                family_state["status"] = "The code expired before anyone entered it. Choose Connect to get a new one."
+            return
+        try:
+            result = hub_request(hub_url + "/hub/pair/status", "POST", {"pairId": pairing["pairId"], "secret": pairing["secret"]})
+        except (TvError, HubRejected) as err:
+            result = {"status": "error", "error": str(err)}
+        if family_state["generation"] != generation:
+            return
+        if result["status"] == "claimed":
+            save_family({"hubUrl": hub_url, "homeId": result["homeId"], "homeName": result["homeName"], "deviceToken": result["deviceToken"]})
+            with family_lock:
+                family_state["pairing"] = None
+                family_state["status"] = "Connecting…"
+            start_family_link()
+            return
+        if result["status"] == "expired" or result["status"] == "error" and "Unknown" in result.get("error", ""):
+            with family_lock:
+                family_state["pairing"] = None
+                family_state["status"] = "The code expired before anyone entered it. Choose Connect to get a new one."
+            return
+        time.sleep(3)
+
+
+def family_disconnect():
+    """Stop remote access from this end. The hub's owners can link it again with a new code."""
+    family = load_settings()["family"]
+    with family_lock:
+        family_state["generation"] += 1
+        family_state["pairing"] = None
+        family_state["status"] = ""
+    save_family({})
+    family_wake.set()
+    if family.get("deviceToken"):
+        # Tell the hub, so family see at once that this home is offline. If it can't be told, it notices soon anyway.
+        def goodbye():
+            try:
+                hub_request(family["hubUrl"] + "/hub/home/goodbye", "POST", {}, token=family["deviceToken"], timeout=10)
+            except (TvError, HubRejected):
+                pass
+        threading.Thread(target=goodbye, daemon=True).start()
+
+
+def start_family_link():
+    """Keep asking the hub for family members' requests while this home is linked."""
+    family = load_settings()["family"]
+    if not family.get("deviceToken") or not family_state["port"]:
+        return
+    with family_lock:
+        family_state["generation"] += 1
+        generation = family_state["generation"]
+    family_wake.clear()
+    threading.Thread(target=family_loop, args=(generation,), daemon=True).start()
+
+
+def family_loop(generation):
+    retry = 2
+    quick = True  # The first check-in after (re)connecting is answered at once, so the status here is right straight away.
+    while family_state["generation"] == generation:
+        family = load_settings()["family"]
+        if not family.get("deviceToken"):
+            return
+        try:
+            reply = hub_request(family["hubUrl"] + "/hub/home/poll" + ("?wait=0" if quick else ""),
+                                token=family["deviceToken"], timeout=FAMILY_POLL_TIMEOUT)
+            quick = False
+        except HubRejected:
+            if family_state["generation"] == generation:
+                save_family({})
+                family_state["status"] = "The family account removed this home, so remote access is off. Choose Connect to link it again."
+            return
+        except TvError as err:
+            if family_state["generation"] == generation:
+                family_state["status"] = f"Not connected: {err} Trying again shortly."
+            family_wake.wait(retry)
+            retry = min(retry * 2, 60)  # Back off while the hub or internet is down.
+            quick = True
+            continue
+        if family_state["generation"] != generation:
+            return
+        retry = 2
+        family_state["status"] = f"Connected as {family['homeName']}."
+        for request in reply.get("requests", []):
+            threading.Thread(target=answer_family_request, args=(family, request), daemon=True).start()
+
+
+def answer_family_request(family, request):
+    """Run a family member's request through this server, exactly like a local request, and send back the answer."""
+    reply = {"id": request.get("id"), "status": 502, "contentType": "application/json",
+             "body": base64.b64encode(b'{"error": "TV Remote at the home couldn\'t do that."}').decode()}
+    try:
+        method, path = request["method"], str(request["path"])
+        if method not in ("GET", "POST") or not path.startswith("/api/"):
+            raise ValueError
+        body = request.get("body")
+        connection = http.client.HTTPConnection("127.0.0.1", family_state["port"], timeout=120)
+        connection.request(method, path, body=body.encode() if body else None, headers={
+            "Content-Type": "application/json",
+            "X-Relay-Secret": relay_secret,
+            "X-Relay-Role": str(request.get("role", "")),
+            "X-Relay-User": urllib.parse.quote(str(request.get("user", "Family"))[:40]),
+        })
+        response = connection.getresponse()
+        content = response.read()
+        reply.update(status=response.status, contentType=response.getheader("Content-Type", "application/json"),
+                     body=base64.b64encode(content).decode(),
+                     activity=urllib.parse.unquote(response.getheader("X-Activity", "")))
+        connection.close()
+    except (KeyError, ValueError, OSError, http.client.HTTPException):
+        pass
+    try:
+        hub_request(family["hubUrl"] + "/hub/home/respond", "POST", reply, token=family["deviceToken"])
+    except (TvError, HubRejected):
+        pass
+
+
+def tv_name_for(ip):
+    return next((tv["name"] for tv in load_settings()["tvs"] if tv["ip"] == ip), "the TV")
+
+
+def describe_action(path, data):
+    """A short description of a family member's action, for the activity log and the "is helping" notice."""
+    on = f" on {tv_name_for(data.get('ip'))}" if isinstance(data.get("ip"), str) else ""
+    if path == "/api/key":
+        key = str(data.get("key", ""))
+        label = {"Select": "OK", "Rev": "Rewind", "Fwd": "Fast forward", "Info": "Options"}.get(key, key)
+        return f"Typed on the TV{on}" if key.startswith("Lit_") else f"Pressed {label}{on}"
+    if path == "/api/channels/play":
+        names = {c["id"]: c["name"] for items in load_channels().values() for c in items}
+        return f"Played {names.get(data.get('id'), 'a channel')}{on}"
+    if path == "/api/channels/save":
+        channel = data.get("channel") if isinstance(data.get("channel"), dict) else {}
+        return f"Saved the {str(channel.get('name', 'channel'))[:40]} button"
+    return {
+        "/api/launch": f"Opened an app{on}", "/api/start-over": f"Pressed Start over{on}", "/api/power-on": f"Turned on{on}",
+        "/api/channels/open": f"Started recording a button{on}", "/api/channels/stop": f"Stopped a button{on}",
+        "/api/channels/delete": "Deleted a button", "/api/channels/reorder": "Rearranged buttons",
+        "/api/schedules/save": "Saved a schedule", "/api/schedules/delete": "Deleted a schedule",
+        "/api/settings": "Changed the view", "/api/apps/hidden": "Changed which apps show", "/api/tvs/remove": "Removed a TV",
+        "/api/lock": "Changed the lock", "/api/alerts": "Changed email alerts", "/api/alerts/test": "Sent a test alert email",
+    }.get(path)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "RokuRemote"
+    relay = None     # (role, name) when the request came from a family member through the hub
+    activity = None  # What that family member did, sent back to the hub for its activity log
 
     def log_message(self, *args):
         pass
+
+    def relay_info(self, method, path):
+        """Requests from the family connection carry a secret only this server knows, and must follow the shared rules."""
+        secret = self.headers.get("X-Relay-Secret")
+        if secret is None:
+            return None
+        role = self.headers.get("X-Relay-Role", "")
+        if not hmac.compare_digest(secret, relay_secret) or not relay_rules.allowed(role, method, path):
+            raise PermissionError
+        return role, urllib.parse.unquote(self.headers.get("X-Relay-User", "Family"))[:40]
 
     def send_body(self, code, body, content_type, cache="no-cache", filename=None):
         try:
             self.send_response(code)
             self.send_header("Content-Type", content_type)
+            if self.activity:
+                self.send_header("X-Activity", urllib.parse.quote(self.activity))
+                helping["at"] = time.time()  # Long actions, like a channel button, keep the notice up until they finish.
             if filename:
                 self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Content-Length", str(len(body)))
@@ -1120,6 +1378,10 @@ class Handler(BaseHTTPRequestHandler):
         url = urllib.parse.urlsplit(self.path)
         query = {key: values[0] for key, values in urllib.parse.parse_qs(url.query).items()}
         try:
+            self.relay = self.relay_info("GET", url.path)
+        except PermissionError:
+            return self.send_json({"error": "That can't be done remotely."}, 403)
+        try:
             if url.path == "/":
                 self.send_body(200, PAGE.read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/saved":
@@ -1133,7 +1395,12 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/schedules":
                 self.send_json(schedules_view())
             elif url.path == "/api/status":
-                self.send_json(status(check_ip(query.get("ip"))))
+                result = status(check_ip(query.get("ip")))
+                result["version"] = data_version
+                # Screens here say when family are helping, so the TV changing by itself isn't alarming.
+                if not self.relay and helping and time.time() - helping["at"] < HELPING_SECONDS:
+                    result["helping"] = helping
+                self.send_json(result)
             elif url.path == "/api/apps":
                 self.send_json({"apps": apps(query.get("ip")), "hidden": hidden_apps(query.get("ip"))})
             elif url.path == "/api/channels":
@@ -1160,7 +1427,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/settings":
                 set_channels_only(data["channelsOnly"])
             elif self.path == "/api/lock":
-                lock_action(data.get("action"), data.get("pin"))
+                lock_action(data.get("action"), data.get("pin"), remote_owner=bool(self.relay and self.relay[0] == "owner"))
             elif self.path == "/api/alerts":
                 save_alerts(data)
             elif self.path == "/api/tvs/remove":
@@ -1169,6 +1436,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise TvError("That TV isn't in the list.")
                 remove_tv(key)
                 return self.send_json({**public_settings(), "saved": load_saved()})
+            elif self.path == "/api/family/connect":
+                family_connect(data.get("hubUrl"))
+            elif self.path == "/api/family/disconnect":
+                family_disconnect()
             elif self.path in ("/api/schedules/save", "/api/schedules/delete"):
                 if self.path.endswith("save"):
                     save_schedule(data.get("schedule"))
@@ -1193,6 +1464,22 @@ class Handler(BaseHTTPRequestHandler):
             if length > MAX_BODY:
                 raise ValueError
             data = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(data, dict):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            return self.send_json({"error": "Bad request"}, 400)
+        try:
+            self.relay = self.relay_info("POST", self.path)
+        except PermissionError:
+            return self.send_json({"error": "That can't be done remotely."}, 403)
+        if self.relay:
+            try:
+                self.activity = describe_action(self.path, data)
+            except (TypeError, ValueError):
+                self.activity = None
+            if self.activity:
+                helping.update(name=self.relay[1], text=self.activity, at=time.time())
+        try:
             if self.path in GLOBAL_POSTS:
                 return self.handle_global_post(data)
             ip = data["ip"]
@@ -1201,8 +1488,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/select":
                 info = device_info(check_ip(ip))
-                save_tv({key: info[key] for key in ("ip", "key", "name", "macs")})
-                remember_tvs([info], chosen=True)
+                # A family member switching TVs remotely shouldn't change which TV this home's screen opens on.
+                if not self.relay:
+                    save_tv({key: info[key] for key in ("ip", "key", "name", "macs")})
+                    remember_tvs([info], chosen=True)
                 self.send_json(info)
             elif self.path == "/api/key":
                 press(ip, data.get("key"))
@@ -1257,6 +1546,9 @@ class Server(ThreadingHTTPServer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         start_scheduler()  # Schedules play while the website or Windows app is running.
+        if not family_state["port"]:
+            family_state["port"] = self.server_address[1]  # Family requests come back in through this port.
+            start_family_link()
 
 
 def main():

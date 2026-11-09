@@ -1,6 +1,23 @@
 # Family accounts: design
 
-**Status:** proposal, nothing built yet
+**Status:** Phase 1 is built, in [`hub/`](../hub/README.md) and TV Remote's Family account setting.
+Choices made while building:
+- **Language:** Python, using the standard library only, with SQLite. It's the same style as TV
+  Remote.
+- **Sign-in:** email and password, stored as salted PBKDF2 hashes. The owner's account is made on the
+  setup page. Everyone else joins only through an invite link, where they choose their password.
+  Owners make one-time reset links for forgotten passwords. (Emailed codes were tried first, but
+  Hotmail filtered them, and a sending Gmail account added setup.)
+- **Home connection:** HTTPS long polling instead of a WebSocket. The home asks the hub for work, and
+  the hub holds the request open for up to 25 seconds until something arrives. It reacts just as
+  quickly, needs no extra packages, and passes through Caddy unchanged.
+- **Roles:** helper and owner. Viewer is left for later.
+- **Not built yet:**
+  - starting with Windows
+  - live TV status
+  - offline alerts
+  - the hub sending alert emails
+  - Phase 3
 **Goal:** let family members control and set up a relative's TVs from anywhere, without changing how
 that relative uses TV Remote.
 
@@ -36,7 +53,7 @@ her internet is down.
 ```mermaid
 flowchart LR
   N[Nephew's phone or computer] -- HTTPS, signed in --> S[Hosted service]
-  H[TV Remote at aunt's home] -- outgoing WebSocket, kept open --> S
+  H[TV Remote at aunt's home] -- outgoing HTTPS, asking for work --> S
   H -- local network, ECP --> R1[Den Roku]
   H -- local network, ECP --> R2[Family room Roku]
   A[Aunt's iPad] -- local network --> H
@@ -185,7 +202,7 @@ service:
    - sign-in
    - homes, members and invites
    - pairing a home with a code
-   - the WebSocket relay with per-role checks
+   - the relay, with per-role checks
    - the activity log
 2. TV Remote:
    - **Connect to family account**
@@ -229,7 +246,7 @@ through the existing **No-IP name** for that house, with the router forwarding t
 container:
 
 ```
-Helper, or TV Remote at aunt's house (outgoing WebSocket)
+Helper, or TV Remote at aunt's house (outgoing HTTPS)
   → yourname.ddns.net:8443
   → router at the NAS's house
   → Caddy container (HTTPS)
@@ -260,42 +277,21 @@ doesn't, the connection is behind CGNAT and forwards won't arrive.
 
 **Containers**, as one Compose project in UGOS Pro's Docker app:
 
-```yaml
-# docker-compose.yml (sketch)
-services:
-  tvremote-service:
-    image: tvremote-service:latest   # built from this repo, Python with FastAPI
-    restart: unless-stopped
-    user: "1000:1000"                # not root
-    read_only: true
-    volumes:
-      - ./data:/data                 # SQLite database and settings. This folder only, never other shares.
-    environment:
-      - PUBLIC_URL=https://yourname.ddns.net:8443
-    networks: [tvremote]
-    # No "ports:" section. Only Caddy reaches it, over the private network.
+As built, it's **one image** containing the hub and Caddy, made on a PC by
+[`hub/build-image.ps1`](../hub/build-image.ps1) and imported in UGOS Pro's Docker app. See
+[hub/README.md](../hub/README.md).
 
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    ports:
-      - "8443:8443"                  # the service, over HTTPS
-      - "80:80"                      # Let's Encrypt certificate checks
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy-data:/data           # certificates, kept across restarts
-    networks: [tvremote]
+- **Settings aren't in the image.** They're entered on a setup page (port 8080, home network only,
+  protected by a setup password) and saved in `/data`. The hub then starts Caddy for the No-IP
+  name.
+- **The container needs only** three ports (8443, 80, and 8080 for setup) and one folder mapped to
+  `/data`.
+- **The hub listens only inside the container,** on 127.0.0.1:8000. Caddy is the only thing
+  reachable.
+- **Both run as an ordinary user,** not root. The settings file can be read only by the hub.
 
-networks:
-  tvremote: {}
-```
-
-```
-# Caddyfile
-yourname.ddns.net:8443 {
-    reverse_proxy tvremote-service:8000
-}
-```
+A Compose alternative, [`hub/docker-compose.yml`](../hub/docker-compose.yml), runs the hub on the
+official Python image with the code mounted in, and Caddy in a second container.
 
 If the NAS already uses port 80 or 8443 for something of its own, map Caddy to other NAS ports, such
 as `8080:80` and `9443:8443`, and point the router's forwards at those. The external ports stay 80 and
@@ -331,13 +327,10 @@ at her house.
 
 ## 11. Decisions needed before building
 
-1. **Python or .NET** for the hosted service. Python suits the NAS container and shares code with
-   TV Remote.
-2. **Which sign-in provider**, which sets what the nephew uses to sign in: Google, Microsoft, or an
-   emailed code.
-3. **Hosting is decided:** the UGREEN NAS, reached through the existing No-IP name with Caddy
-   (Option C). Still to check: that the NAS's house has a public IP (no CGNAT), and which NAS ports
-   are free.
+1. **Decided: Python** for the hosted service.
+2. **Decided: email and password** sign-in, with invite links and owner-made reset links.
+3. **Decided: hosting** on the UGREEN NAS, reached through the existing No-IP name, with Caddy in the
+   same container. NAS port 80 is taken by UGOS, so the container uses NAS port 8088 for it.
 4. **Whether the "is helping" banner shows** the helper's name or just "Family is helping".
 5. **Which computer stays on at the aunt's house**, and that it's set never to sleep.
 

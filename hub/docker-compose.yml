@@ -1,0 +1,39 @@
+# TV Remote family hub, with Caddy in front for HTTPS. Uses only official images: nothing to build.
+# Copy .env.example to .env and Caddyfile.example to Caddyfile, fill them in, then start the project.
+services:
+  hub:
+    image: python:3.12-slim
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"   # The NAS user that owns the data folder. Set PUID and PGID in .env.
+    read_only: true
+    command: python /app/hub/hub.py
+    env_file: .env
+    environment:
+      - HUB_DATA=/data
+      - HUB_WEB_DIR=/app/web
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # The hub's code, read-only. To update, replace these files and restart the project.
+      - ./hub.py:/app/hub/hub.py:ro
+      - ./portal.html:/app/hub/portal.html:ro
+      - ../web/index.html:/app/web/index.html:ro
+      - ../web/relay_rules.py:/app/web/relay_rules.py:ro
+      # Accounts and homes. Include this folder in the NAS's backups.
+      - ./data:/data
+    networks: [tvremote]
+    # No "ports:" section. Only Caddy reaches the hub, over this private network.
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "8443:8443"               # The family hub, over HTTPS. Forward this from the router.
+      - "80:80"                   # Let's Encrypt certificate checks only. Forward this from the router too.
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-data:/data        # Certificates, kept across restarts
+    networks: [tvremote]
+
+networks:
+  tvremote: {}

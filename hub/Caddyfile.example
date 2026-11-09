@@ -1,0 +1,4 @@
+# Replace yourname.ddns.net with your No-IP name. Caddy gets and renews the HTTPS certificate itself.
+yourname.ddns.net:8443 {
+    reverse_proxy hub:8000
+}

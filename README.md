@@ -10,6 +10,7 @@ can open from any device on the same network, or as a Windows app.
 |---|---|
 | `web\` | The website: `server.py` (the server) and `index.html` (the remote page). The Windows app uses these too. |
 | `windows\` | The Windows app: `app.py` (opens the page in its own window), `build.ps1` and `icon.ico` |
+| `hub\` | The family hub, so invited family members can use a home's TV Remote from anywhere. Runs in Docker on a NAS. See [hub/README.md](hub/README.md). |
 
 ## Run the website
 Needs Python 3.10 or newer, and nothing else to install.
@@ -39,6 +40,6 @@ The website keeps these in `web\`, next to `server.py`. The Windows app keeps it
 |---|---|
 | `tv.json` | The TV currently selected |
 | `channels.json` | Channel and shortcut buttons for each TV, with the app versions they last worked with |
-| `settings.json` | Known TVs, view settings, schedules, the lock PIN's hash and email alert settings, including the email password in plain text |
+| `settings.json` | Known TVs, view settings, schedules, the lock PIN's hash, email alert settings including the email password in plain text, and the family hub link including its access token |
 
 Keep `settings.json` private, and out of any shared or public repository.

@@ -195,6 +195,15 @@
   .palette .key { min-height: 44px; }
   .palette .ok-add { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 
+  body.remote .local-only { display: none !important; }
+  .family-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; padding: 10px 12px; background: #2b2552; border: 1px solid var(--accent); border-radius: 12px; }
+  .family-bar label { margin: 0; font-size: 14px; font-weight: 600; }
+  .family-bar select { flex: 1 1 160px; width: auto; padding: 6px 10px; }
+  .helping-note { margin-bottom: 12px; padding: 12px 14px; background: #1d3b2a; border: 1px solid #2f7a4f; border-radius: 12px; font-size: 16px; }
+  body.locked .helping-note { font-size: 20px; }
+  .family-pairing { margin-top: 10px; }
+  .family-code { margin: 4px 0; font-size: 36px; font-weight: 700; letter-spacing: 6px; }
+  #family-status { margin-top: 10px; }
   .schedules { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   .schedule { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: 10px 12px; background: var(--key); border-radius: 10px; }
   .schedule.off { opacity: .6; }
@@ -287,12 +296,18 @@
   </section>
 
   <div id="remote" hidden>
+    <div id="family-bar" class="family-bar" hidden>
+      <label for="home-select">Controlling</label>
+      <select id="home-select" class="field"></select>
+      <a href="/" class="link">Family account</a>
+    </div>
+    <div id="helping-note" class="helping-note" role="status" hidden></div>
     <header>
       <div class="tv-title">
         <h1 id="tv-name">TV</h1>
         <div class="state"><span id="dot" class="dot"></span><span id="state-text" role="status">Checking…</span></div>
       </div>
-      <button id="change-tv" class="text-btn hide-recording hide-locked" type="button">Change TV</button>
+      <button id="change-tv" class="text-btn hide-recording hide-locked local-only" type="button">Change TV</button>
     </header>
 
     <div id="banner" hidden>
@@ -343,7 +358,7 @@
           <div class="panel-head">
             <h2>TVs</h2>
             <div class="head-actions hide-channels-only">
-              <button id="add-tv" class="link" type="button" hidden>+ Add a TV</button>
+              <button id="add-tv" class="link local-only" type="button" hidden>+ Add a TV</button>
               <button id="tvs-edit" class="link" type="button">Edit</button>
             </div>
           </div>
@@ -506,12 +521,14 @@
         <div class="panel hide-recording hide-channels-only">
           <details id="settings-section" class="settings-section">
           <summary><h2>Settings</h2></summary>
-          <p class="muted">Save this TV's channels to a file, or add channels from a file. Importing adds new channels and updates matching ones. It won't remove any.</p>
-          <div class="row cols-2 settings-actions">
-            <a id="export-channels" class="key" href="#">Export channels</a>
-            <button id="import-channels" class="key" type="button">Import channels</button>
+          <div class="local-only">
+            <p class="muted">Save this TV's channels to a file, or add channels from a file. Importing adds new channels and updates matching ones. It won't remove any.</p>
+            <div class="row cols-2 settings-actions">
+              <a id="export-channels" class="key" href="#">Export channels</a>
+              <button id="import-channels" class="key" type="button">Import channels</button>
+            </div>
+            <input id="import-file" type="file" accept=".json,application/json" hidden>
           </div>
-          <input id="import-file" type="file" accept=".json,application/json" hidden>
 
           <div class="settings-block">
             <h3>Lock view</h3>
@@ -523,7 +540,7 @@
             <div id="lock-open" hidden>
               <p class="muted">The lock is on, and unlocked on this device until it reloads or you lock it again.</p>
               <div class="form-buttons">
-                <button id="relock" class="text-btn" type="button">Lock this device again</button>
+                <button id="relock" class="text-btn local-only" type="button">Lock this device again</button>
                 <button id="lock-off" class="text-btn" type="button">Turn off lock for everyone</button>
               </div>
             </div>
@@ -575,6 +592,27 @@
               <p id="alert-status" class="muted" role="status"></p>
             </form>
           </div>
+
+          <div class="settings-block local-only">
+            <h3>Family account</h3>
+            <p class="muted">Lets invited family members use this remote, and change its buttons and schedules, from anywhere, through your family's TV Remote hub. Only people the home's owners invite can get in. This computer has to stay on, with TV Remote running.</p>
+            <form id="family-form" class="type-row">
+              <input id="family-hub" class="field" type="url" placeholder="Family hub address, like https://name.ddns.net:8443" aria-label="Family hub address" autocomplete="off" required>
+              <button class="key">Connect</button>
+            </form>
+            <div id="family-pairing" class="family-pairing" hidden>
+              <p class="muted">On the family hub's website, choose Link a home and enter this code:</p>
+              <p id="family-code" class="family-code"></p>
+              <p id="family-expires" class="muted"></p>
+              <button id="family-cancel" class="text-btn" type="button">Cancel</button>
+            </div>
+            <div id="family-connected" hidden>
+              <div class="form-buttons">
+                <button id="family-disconnect" class="text-btn" type="button">Disconnect</button>
+              </div>
+            </div>
+            <p id="family-status" class="muted" role="status"></p>
+          </div>
           </details>
         </div>
         <div class="panel shortcuts hide-channels-only">
@@ -598,6 +636,9 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+// On the family hub, this page lives at /home/<id>/ and every request goes through the hub to that home.
+const BASE = (location.pathname.match(/^\/home\/[0-9a-f]{32}/) || [''])[0];
+const REMOTE = Boolean(BASE);
 let tv = null;            // { ip, name, macs }
 let appsLoadedFor = null;
 let queue = Promise.resolve();
@@ -614,7 +655,10 @@ let knownTvs = [];        // Every TV seen so far: { key, ip, name }
 let editingTvs = false;
 let channelsOnly = false;
 let lockIsOn = false;
-let unlockedHere = false;  // Only this device: a relative helping remotely doesn't unlock the viewer's screen.
+let unlockedHere = REMOTE;  // Only this device: a relative helping remotely doesn't unlock the viewer's screen.
+let familyTimer = null;
+let homeName = '';
+let dataVersion = null;   // The server's change counter when this screen last loaded apps, channels and settings
 let alertsEnabled = false;
 let alertsFormEdited = false;
 let unlockPin = '';
@@ -638,10 +682,11 @@ async function api(path, body) {
   const options = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
   let response;
   try {
-    response = await fetch(path, options);
+    response = await fetch(BASE + path, options);
   } catch {
-    throw new Error('Lost connection to the remote server. Is it still running?');
+    throw new Error(REMOTE ? "Couldn't reach the family hub. Check your internet connection." : 'Lost connection to the remote server. Is it still running?');
   }
+  if (REMOTE && response.status === 401) location.href = '/sign-in';
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Something went wrong.');
   return data;
@@ -665,7 +710,8 @@ function applySettings(settings) {
   knownTvs = settings.tvs;
   lockIsOn = settings.locked;
   alertsEnabled = settings.alerts.emails.length > 0 && Boolean(settings.alerts.host);
-  if (!lockIsOn) unlockedHere = false;
+  if (!lockIsOn) unlockedHere = REMOTE;  // Family members signed in to the hub are never locked out.
+  if (settings.family) renderFamily(settings.family);
   const locked = isLocked();
   if (locked) editingChannels = false;
   document.body.classList.toggle('locked', locked);
@@ -776,6 +822,7 @@ $('tvs-edit').addEventListener('click', () => {
 
 // A search finds newly added TVs and any whose address changed, without slowing startup.
 async function refreshKnownTvs() {
+  if (REMOTE) return;  // Searching a home's network isn't possible from outside it.
   try {
     await api('/api/discover');
     await loadSettings();
@@ -852,6 +899,8 @@ async function refresh() {
   try {
     const status = await api('/api/status?ip=' + encodeURIComponent(ip));
     if (!tv || tv.ip !== ip) return;
+    $('helping-note').hidden = !status.helping;
+    if (status.helping) $('helping-note').textContent = `${status.helping.name} is helping: ${status.helping.text}`;
     if (!status.reachable) {
       setState('down', 'Not responding, or in deep standby');
       return;
@@ -860,6 +909,19 @@ async function refresh() {
     $('inputs-panel').hidden = !status.isTv;
     if (status.powerMode === 'PowerOn') setState('on', 'On');
     else setState('standby', 'Standby');
+    // Someone else saved changes, on another screen or through the family hub. Show them,
+    // unless this screen is in the middle of editing, recording or playing.
+    if (status.version !== dataVersion) {
+      const busy = draft || recording || playing || editingApps || editingChannels || editingTvs || document.querySelector('.channel.dragging');
+      if (!busy) {
+        if (dataVersion !== null) {
+          appsLoadedFor = null;
+          channelsLoadedFor = null;
+          await loadSettings();
+        }
+        dataVersion = status.version;
+      }
+    }
     if (appsLoadedFor !== ip) await loadApps(ip);
     if (channelsLoadedFor !== ip) await loadChannels(ip);
     activeAppId = status.activeApp;
@@ -948,7 +1010,7 @@ function appButton(ip, app) {
   const icon = document.createElement('img');
   icon.alt = '';
   icon.loading = 'lazy';
-  icon.src = `/api/icon?ip=${encodeURIComponent(ip)}&id=${encodeURIComponent(app.id)}`;
+  icon.src = `${BASE}/api/icon?ip=${encodeURIComponent(ip)}&id=${encodeURIComponent(app.id)}`;
   icon.addEventListener('error', () => icon.remove());
   button.append(label, icon);
   button.addEventListener('click', async () => {
@@ -1710,7 +1772,7 @@ $('lock-form').addEventListener('submit', async (event) => {
   try {
     const settings = await api('/api/lock', { action: 'lock', pin: $('lock-pin').value });
     $('lock-pin').value = '';
-    unlockedHere = false;
+    unlockedHere = REMOTE;
     applySettings(settings);
     renderChannels();
     window.scrollTo(0, 0);
@@ -1734,6 +1796,67 @@ $('lock-off').addEventListener('click', async () => {
     toast(err.message);
   }
 });
+
+/* Family account: link this home to the family hub, so family members can help from anywhere */
+function renderFamily(family) {
+  $('family-form').hidden = family.connected || Boolean(family.pairing);
+  $('family-pairing').hidden = !family.pairing;
+  $('family-connected').hidden = !family.connected;
+  if (family.pairing) {
+    $('family-code').textContent = family.pairing.code.replace(/^(\d{3})(\d{3})$/, '$1 $2');
+    $('family-expires').textContent = `It works for about ${Math.max(1, Math.ceil(family.pairing.secondsLeft / 60))} more minutes.`;
+  }
+  if (!$('family-hub').value) $('family-hub').value = family.hubUrl || family.pairing?.hubUrl || '';
+  $('family-status').textContent = family.connected ? family.status || 'Connecting…' : family.status;
+  clearTimeout(familyTimer);
+  // Watch for the code being entered, and keep the connection status current.
+  if (!REMOTE && (family.pairing || family.connected)) familyTimer = setTimeout(loadSettings, family.pairing ? 3000 : 15000);
+}
+$('family-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    applySettings(await api('/api/family/connect', { hubUrl: $('family-hub').value }));
+  } catch (err) {
+    toast(err.message);
+  }
+});
+async function disconnectFamily() {
+  try {
+    applySettings(await api('/api/family/disconnect', {}));
+  } catch (err) {
+    toast(err.message);
+  }
+}
+$('family-cancel').addEventListener('click', disconnectFamily);
+let confirmingDisconnect = false;
+$('family-disconnect').addEventListener('click', () => {
+  if (!confirmingDisconnect) {
+    confirmingDisconnect = true;
+    $('family-disconnect').textContent = 'Tap again to end remote access';
+    setTimeout(() => { confirmingDisconnect = false; $('family-disconnect').textContent = 'Disconnect'; }, 5000);
+    return;
+  }
+  confirmingDisconnect = false;
+  $('family-disconnect').textContent = 'Disconnect';
+  disconnectFamily();
+});
+
+// On the hub: show which home this is, and let family members switch between their homes.
+async function loadFamilyBar() {
+  document.body.classList.add('remote');
+  $('family-bar').hidden = false;
+  try {
+    const response = await fetch('/api/me');
+    if (response.status === 401) { location.href = '/sign-in'; return; }
+    const data = await response.json();
+    const id = BASE.split('/')[2];
+    $('home-select').replaceChildren(...data.homes.map((home) => new Option(home.name + (home.online ? '' : ' (not connected)'), home.id)));
+    $('home-select').value = id;
+    homeName = data.homes.find((home) => home.id === id)?.name || '';
+    if (homeName) document.title = `${homeName} · TV Remote`;
+  } catch {}
+}
+$('home-select').addEventListener('change', () => { location.href = `/home/${$('home-select').value}/`; });
 
 /* Email alerts */
 ['alert-emails', 'alert-provider', 'alert-host', 'alert-port', 'alert-security', 'alert-username', 'alert-password', 'alert-from'].forEach((id) => {
@@ -1958,6 +2081,7 @@ setInterval(() => { if (!document.hidden && !$('remote').hidden) refresh(); }, 8
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('remote').hidden) refresh(); });
 
 (async () => {
+  if (REMOTE) loadFamilyBar();
   await loadSettings();
   try {
     const saved = await api('/api/saved');

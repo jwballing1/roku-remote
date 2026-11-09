@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14151a">
+<title>TV Remote Family</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14151a; --panel: #1e2027; --key: #2b2e38; --line: #363a47;
+    --text: #f2f3f7; --muted: #a3a8b8; --accent: #8f7bff; --accent-ink: #14112b;
+    --on: #4ade80; --down: #f87171;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, input, select { font: inherit; color: inherit; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; }
+  header h1 { margin: 0; font-size: 20px; }
+  .panel { background: var(--panel); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 15px; }
+  .muted { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  label { display: block; margin: 0 0 12px; font-size: 14px; color: var(--muted); }
+  .field { display: block; width: 100%; margin-top: 4px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+  .code { font-size: 22px; letter-spacing: 4px; }
+  .primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 600; cursor: pointer; }
+  .primary:disabled { opacity: .6; }
+  .text-btn { background: none; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+  .link { background: none; border: 0; padding: 4px 0; color: var(--accent); cursor: pointer; font-size: 14px; }
+  .danger { color: var(--down); }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .home { border-top: 1px solid var(--line); padding: 14px 0; }
+  .home:first-of-type { border-top: 0; padding-top: 0; }
+  .home-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .home-head strong { font-size: 17px; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--down); }
+  .dot.on { background: var(--on); }
+  a.primary { text-decoration: none; display: inline-block; }
+  .manage { margin-top: 12px; padding: 12px; background: var(--bg); border-radius: 12px; }
+  .manage h3 { margin: 16px 0 8px; font-size: 14px; }
+  .manage h3:first-child { margin-top: 0; }
+  .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+  .list li { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .list small { color: var(--muted); }
+  .invite-link { word-break: break-all; font-size: 13px; padding: 8px; background: var(--panel); border-radius: 8px; margin-top: 8px; }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 480px; margin: 0 auto; padding: 12px 14px; border-radius: 10px; background: #3b1d22; border: 1px solid #7a2f38; font-size: 14px; }
+  #toast.info { background: var(--panel); border-color: var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>TV Remote Family</h1>
+    <div class="buttons" id="account" hidden>
+      <span id="account-name" class="muted" style="margin:0"></span>
+      <button id="change-password" class="link" type="button">Change password</button>
+      <button id="sign-out" class="text-btn" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <section id="sign-in" class="panel" hidden>
+    <h2>Sign in</h2>
+    <form id="sign-in-form">
+      <label>Email address
+        <input id="email" class="field" type="email" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input id="password" class="field" type="password" autocomplete="current-password" required>
+      </label>
+      <button class="primary">Sign in</button>
+      <p class="muted" style="margin:12px 0 0">Forgot your password? Ask the person who invited you for a reset link.</p>
+    </form>
+  </section>
+
+  <section id="invite" class="panel" hidden>
+    <h2>Join</h2>
+    <p id="invite-note" class="muted"></p>
+    <form id="invite-form">
+      <label>Your name, shown on the TV screen when you help
+        <input id="invite-name" class="field" maxlength="40" autocomplete="name">
+      </label>
+      <label>Your email
+        <input id="invite-email" class="field" type="email" autocomplete="username" required>
+      </label>
+      <label>Choose a password, at least 8 characters
+        <input id="invite-password" class="field" type="password" autocomplete="new-password" required>
+      </label>
+      <label>Type the password again
+        <input id="invite-confirm" class="field" type="password" autocomplete="new-password" required>
+      </label>
+      <p class="muted">Already have an account here? Enter its email and password instead.</p>
+      <button class="primary">Join</button>
+    </form>
+  </section>
+
+  <section id="reset" class="panel" hidden>
+    <h2>Choose a new password</h2>
+    <p id="reset-note" class="muted"></p>
+    <form id="reset-form">
+      <input id="reset-email" type="email" autocomplete="username" hidden>
+      <label>New password, at least 8 characters
+        <input id="reset-password" class="field" type="password" autocomplete="new-password" required>
+      </label>
+      <label>Type it again
+        <input id="reset-confirm" class="field" type="password" autocomplete="new-password" required>
+      </label>
+      <button class="primary">Save password</button>
+    </form>
+  </section>
+
+  <section id="password-panel" class="panel" hidden>
+    <h2>Change your password</h2>
+    <form id="password-form">
+      <label>Current password
+        <input id="current-password" class="field" type="password" autocomplete="current-password" required>
+      </label>
+      <label>New password, at least 8 characters
+        <input id="new-password" class="field" type="password" autocomplete="new-password" required>
+      </label>
+      <div class="buttons">
+        <button class="primary">Change password</button>
+        <button id="password-cancel" class="link" type="button">Cancel</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="homes-panel" class="panel" hidden>
+    <h2>Homes</h2>
+    <p id="no-homes" class="muted" hidden>No homes yet. Link one below, or ask a family member for an invite link.</p>
+    <div id="homes"></div>
+  </section>
+
+  <section id="link-panel" class="panel" hidden>
+    <h2>Link a home</h2>
+    <p class="muted">On the computer that runs TV Remote at the home, open Settings, then Family account, and choose Connect. Enter the code it shows.</p>
+    <form id="link-form">
+      <label>Code from TV Remote
+        <input id="link-code" class="field code" inputmode="numeric" maxlength="7" required>
+      </label>
+      <label>Name for this home
+        <input id="link-name" class="field" maxlength="40" placeholder="Aunt Mary's home" required>
+      </label>
+      <button class="primary">Link home</button>
+    </form>
+  </section>
+</div>
+<div id="toast" role="alert" hidden></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const invite = (location.pathname.match(/^\/invite\/([\w-]+)$/) || [])[1] || '';
+const reset = (location.pathname.match(/^\/reset\/([\w-]+)$/) || [])[1] || '';
+let toastTimer;
+let openHome = null;
+
+function toast(message, info = false) {
+  $('toast').textContent = message;
+  $('toast').classList.toggle('info', info);
+  $('toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').hidden = true; }, info ? 3000 : 7000);
+}
+
+async function api(path, body) {
+  const options = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch {
+    throw new Error("Couldn't reach the family hub. Check your internet connection.");
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(data.error || 'Something went wrong.');
+    err.status = response.status;
+    throw err;
+  }
+  return data;
+}
+
+function when(seconds) {
+  if (!seconds) return 'never';
+  const date = new Date(seconds * 1000);
+  const today = new Date().toDateString() === date.toDateString();
+  return (today ? 'today ' : date.toLocaleDateString() + ' ') + date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/* Sign in, join with an invite, or set a new password from a reset link */
+function showOnly(id) {
+  for (const section of ['sign-in', 'invite', 'reset', 'password-panel', 'homes-panel', 'link-panel']) $(section).hidden = section !== id;
+  $('account').hidden = true;
+}
+
+function showSignIn() {
+  if (invite) {
+    showOnly('invite');
+    api('/api/invite-info/' + invite)
+      .then((info) => { $('invite-note').textContent = `You've been invited to help with ${info.home}. Make your account to join.`; })
+      .catch((err) => { $('invite-note').textContent = err.message; $('invite-form').hidden = true; });
+  } else if (reset) {
+    showOnly('reset');
+    api('/api/reset-info/' + reset)
+      .then((info) => { $('reset-note').textContent = `For ${info.name} (${info.email}).`; $('reset-email').value = info.email; })
+      .catch((err) => { $('reset-note').textContent = err.message; $('reset-form').hidden = true; });
+  } else {
+    showOnly('sign-in');
+  }
+}
+
+function signedIn() {
+  history.replaceState(null, '', '/');
+  location.reload();
+}
+
+$('sign-in-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await api('/api/sign-in', { email: $('email').value, password: $('password').value });
+    signedIn();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('invite-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if ($('invite-password').value !== $('invite-confirm').value) { toast("The two passwords don't match."); return; }
+  try {
+    await api('/api/invite/accept', { invite, name: $('invite-name').value, email: $('invite-email').value, password: $('invite-password').value });
+    signedIn();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('reset-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if ($('reset-password').value !== $('reset-confirm').value) { toast("The two passwords don't match."); return; }
+  try {
+    await api('/api/reset', { reset, password: $('reset-password').value });
+    signedIn();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('change-password').addEventListener('click', () => { $('password-panel').hidden = false; $('current-password').focus(); });
+$('password-cancel').addEventListener('click', () => { $('password-panel').hidden = true; $('password-form').reset(); });
+$('password-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await api('/api/password', { current: $('current-password').value, password: $('new-password').value });
+    $('password-form').reset();
+    $('password-panel').hidden = true;
+    toast('Password changed.', true);
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('sign-out').addEventListener('click', async () => {
+  await api('/api/sign-out', {}).catch(() => {});
+  location.href = '/';
+});
+
+/* Homes */
+async function load() {
+  let data;
+  try {
+    data = await api('/api/me');
+  } catch (err) {
+    if (err.status === 401) return showSignIn();
+    return toast(err.message);
+  }
+  if (invite || reset) {
+    // Already signed in: still let them accept the invite or use the reset link, as whoever it's for.
+    showSignIn();
+    return;
+  }
+  $('sign-in').hidden = $('invite').hidden = $('reset').hidden = true;
+  $('homes-panel').hidden = $('link-panel').hidden = $('account').hidden = false;
+  $('account-name').textContent = data.user.name;
+  $('no-homes').hidden = data.homes.length > 0;
+  $('homes').replaceChildren(...data.homes.map(homeCard));
+}
+
+function homeCard(home) {
+  const card = document.createElement('div');
+  card.className = 'home';
+  const head = document.createElement('div');
+  head.className = 'home-head';
+  const title = document.createElement('div');
+  const name = document.createElement('strong');
+  name.textContent = home.name;
+  const status = document.createElement('div');
+  status.className = 'status';
+  const dot = document.createElement('span');
+  dot.className = 'dot' + (home.online ? ' on' : '');
+  status.append(dot, home.online ? 'Connected' : `Not connected. Last seen ${when(home.lastSeen)}`, ` · ${home.role === 'owner' ? 'Owner' : 'Helper'}`);
+  title.append(name, status);
+  const buttons = document.createElement('div');
+  buttons.className = 'buttons';
+  const open = document.createElement('a');
+  open.className = 'primary';
+  open.href = `/home/${home.id}/`;
+  open.textContent = 'Open remote';
+  buttons.append(open);
+  if (home.role === 'owner') {
+    const manage = document.createElement('button');
+    manage.type = 'button';
+    manage.className = 'text-btn';
+    manage.textContent = openHome === home.id ? 'Close' : 'Manage';
+    manage.addEventListener('click', () => { openHome = openHome === home.id ? null : home.id; load(); });
+    buttons.append(manage);
+  }
+  head.append(title, buttons);
+  card.append(head);
+  if (openHome === home.id) card.append(managePanel(home));
+  return card;
+}
+
+function managePanel(home) {
+  const panel = document.createElement('div');
+  panel.className = 'manage';
+  panel.textContent = 'Loading…';
+  api('/api/homes/' + home.id).then((details) => {
+    panel.replaceChildren();
+    // Invite
+    const inviteTitle = document.createElement('h3');
+    inviteTitle.textContent = 'Invite someone';
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.textContent = 'Helpers can use the remote and change buttons and schedules. Owners can also invite people, and change the lock and alerts. Links work once, for 7 days.';
+    const row = document.createElement('div');
+    row.className = 'buttons';
+    const role = document.createElement('select');
+    role.className = 'field';
+    role.style.width = 'auto';
+    role.style.marginTop = '0';
+    role.append(new Option('Helper', 'helper'), new Option('Owner', 'owner'));
+    const create = document.createElement('button');
+    create.type = 'button';
+    create.className = 'primary';
+    create.textContent = 'Create invite link';
+    const output = document.createElement('div');
+    create.addEventListener('click', async () => {
+      try {
+        const result = await api(`/api/homes/${home.id}/invite`, { role: role.value });
+        const link = document.createElement('div');
+        link.className = 'invite-link';
+        link.textContent = result.link;
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'link';
+        copy.textContent = 'Copy link';
+        copy.addEventListener('click', () => navigator.clipboard.writeText(result.link).then(() => toast('Copied. Send it to them by text or email.', true)));
+        output.replaceChildren(link, copy);
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+    row.append(role, create);
+    panel.append(inviteTitle, note, row, output);
+
+    // People
+    const peopleTitle = document.createElement('h3');
+    peopleTitle.textContent = 'People';
+    const people = document.createElement('ul');
+    people.className = 'list';
+    people.append(...details.members.map((member) => {
+      const item = document.createElement('li');
+      const who = document.createElement('span');
+      who.textContent = `${member.name} `;
+      const extra = document.createElement('small');
+      extra.textContent = `${member.email} · ${member.role === 'owner' ? 'Owner' : 'Helper'}${member.hasPassword ? '' : ' · No password yet: send a reset link'}`;
+      who.append(extra);
+      const resetLink = document.createElement('button');
+      resetLink.type = 'button';
+      resetLink.className = 'link';
+      resetLink.textContent = 'Reset password';
+      resetLink.addEventListener('click', async () => {
+        try {
+          const result = await api(`/api/homes/${home.id}/reset-link`, { userId: member.id });
+          const box = document.createElement('div');
+          box.className = 'invite-link';
+          box.textContent = `Send ${member.name} this link. It works once, for ${result.days} days: ${result.link}`;
+          const copy = document.createElement('button');
+          copy.type = 'button';
+          copy.className = 'link';
+          copy.textContent = 'Copy link';
+          copy.addEventListener('click', () => navigator.clipboard.writeText(result.link).then(() => toast('Copied. Send it to them by text or email.', true)));
+          item.after(box, copy);
+        } catch (err) {
+          toast(err.message);
+        }
+      });
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'link danger';
+      remove.textContent = 'Remove';
+      let confirming = false;
+      remove.addEventListener('click', async () => {
+        if (!confirming) { confirming = true; remove.textContent = 'Tap again to remove'; return; }
+        try { await api(`/api/homes/${home.id}/remove-member`, { userId: member.id }); load(); } catch (err) { toast(err.message); }
+      });
+      const actions = document.createElement('span');
+      actions.className = 'buttons';
+      actions.append(resetLink, remove);
+      item.append(who, actions);
+      return item;
+    }));
+    panel.append(peopleTitle, people);
+
+    // Activity
+    const activityTitle = document.createElement('h3');
+    activityTitle.textContent = 'Recent activity';
+    const activity = document.createElement('ul');
+    activity.className = 'list';
+    if (!details.activity.length) {
+      const empty = document.createElement('li');
+      empty.textContent = 'Nothing yet.';
+      activity.append(empty);
+    }
+    activity.append(...details.activity.map((entry) => {
+      const item = document.createElement('li');
+      const text = document.createElement('span');
+      text.textContent = `${entry.name}: ${entry.text}${entry.ok ? '' : " (didn't work)"}`;
+      const time = document.createElement('small');
+      time.textContent = when(entry.at);
+      item.append(text, time);
+      return item;
+    }));
+    panel.append(activityTitle, activity);
+
+    // Remove home
+    const removeTitle = document.createElement('h3');
+    removeTitle.textContent = 'Remove this home';
+    const removeNote = document.createElement('p');
+    removeNote.className = 'muted';
+    removeNote.textContent = 'Ends remote access for everyone. TV Remote at the home keeps working there, and can be linked again later.';
+    const removeHome = document.createElement('button');
+    removeHome.type = 'button';
+    removeHome.className = 'text-btn danger';
+    removeHome.textContent = 'Remove home';
+    let confirming = false;
+    removeHome.addEventListener('click', async () => {
+      if (!confirming) { confirming = true; removeHome.textContent = 'Tap again to remove'; return; }
+      try { await api(`/api/homes/${home.id}/remove`, {}); openHome = null; load(); } catch (err) { toast(err.message); }
+    });
+    panel.append(removeTitle, removeNote, removeHome);
+  }).catch((err) => { panel.textContent = err.message; });
+  return panel;
+}
+
+$('link-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const home = await api('/api/homes/link', { code: $('link-code').value, name: $('link-name').value });
+    $('link-code').value = $('link-name').value = '';
+    toast(`${home.name} is linked. TV Remote there connects within a few seconds.`, true);
+    load();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+load();
+setInterval(() => { if (!document.hidden && !$('homes-panel').hidden && !openHome) load(); }, 15000);
+</script>
+</body>
+</html>
