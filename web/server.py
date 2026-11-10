@@ -289,6 +289,7 @@ def load_settings():
         "alerts": {"provider": "gmail", "emails": [], "host": "", "port": 587, "security": "starttls", "username": "", "password": "", "from": ""},
         "schedules": [],
         "family": {},  # Family hub link: hubUrl, homeId, homeName and deviceToken
+        "tvOptions": {},  # TV key -> {"powerVolume": False} for TVs that ignore power and volume
     }
     try:
         settings.update(json.loads(SETTINGS_FILE.read_text(encoding="utf-8")))
@@ -469,6 +470,20 @@ def set_channels_only(enabled):
     with settings_lock:
         settings = load_settings()
         settings["channelsOnly"] = bool(enabled)
+        write_settings(settings)
+
+
+def power_volume_shown(key):
+    """Whether to show power and volume for a TV. Sticks only manage them if the TV supports HDMI-CEC,
+    which can't be detected, so people turn them off for TVs that ignore them."""
+    return load_settings()["tvOptions"].get(key, {}).get("powerVolume", True)
+
+
+def set_power_volume(ip, shown):
+    key = device_key(ip)
+    with settings_lock:
+        settings = load_settings()
+        settings["tvOptions"].setdefault(key, {})["powerVolume"] = bool(shown)
         write_settings(settings)
 
 
@@ -1315,6 +1330,7 @@ def describe_action(path, data):
         "/api/channels/delete": "Deleted a button", "/api/channels/reorder": "Rearranged buttons",
         "/api/schedules/save": "Saved a schedule", "/api/schedules/delete": "Deleted a schedule",
         "/api/settings": "Changed the view", "/api/apps/hidden": "Changed which apps show", "/api/tvs/remove": "Removed a TV",
+        "/api/tv-options": f"Changed whether power and volume show{on}",
         "/api/lock": "Changed the lock", "/api/alerts": "Changed email alerts", "/api/alerts/test": "Sent a test alert email",
     }.get(path)
 
@@ -1397,6 +1413,8 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/status":
                 result = status(check_ip(query.get("ip")))
                 result["version"] = data_version
+                if result.get("key"):
+                    result["powerVolume"] = power_volume_shown(result["key"])
                 # Screens here say when family are helping, so the TV changing by itself isn't alarming.
                 if not self.relay and helping and time.time() - helping["at"] < HELPING_SECONDS:
                     result["helping"] = helping
@@ -1513,6 +1531,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(save_channel(ip, data.get("channel"), data.get("tvs")))
             elif self.path == "/api/apps/hidden":
                 set_hidden_apps(ip, data.get("hidden"))
+                self.send_json({"ok": True})
+            elif self.path == "/api/tv-options":
+                set_power_volume(ip, data.get("powerVolume"))
                 self.send_json({"ok": True})
             elif self.path == "/api/channels/import":
                 self.send_json(import_channels(check_ip(ip), data.get("data")))

@@ -196,6 +196,7 @@
   .palette .ok-add { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 
   body.remote .local-only { display: none !important; }
+  body.no-power-volume .power-volume { display: none; }
   .family-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; padding: 10px 12px; background: #2b2552; border: 1px solid var(--accent); border-radius: 12px; }
   .family-bar label { margin: 0; font-size: 14px; font-weight: 600; }
   .family-bar select { flex: 1 1 160px; width: auto; padding: 6px 10px; }
@@ -321,7 +322,7 @@
     <div class="layout">
       <div class="hide-channels-only">
         <div class="panel">
-          <div class="row cols-2">
+          <div class="row cols-2 power-volume">
             <button class="key power-on" id="power-on" type="button"><svg><use href="#i-power"/></svg>Turn on</button>
             <button class="key power-off" data-key="PowerOff" type="button"><svg><use href="#i-power"/></svg>Turn off</button>
           </div>
@@ -345,7 +346,7 @@
             <button class="key" data-key="Play" aria-label="Play or pause" type="button"><svg><use href="#i-play"/></svg></button>
             <button class="key" data-key="Fwd" aria-label="Fast forward" type="button"><svg><use href="#i-fwd"/></svg></button>
           </div>
-          <div class="row cols-3">
+          <div class="row cols-3 power-volume">
             <button class="key" data-key="VolumeDown" data-repeat aria-label="Volume down" type="button"><svg><use href="#i-vol-down"/></svg></button>
             <button class="key" data-key="VolumeMute" aria-label="Mute" type="button"><svg><use href="#i-mute"/></svg></button>
             <button class="key" data-key="VolumeUp" data-repeat aria-label="Volume up" type="button"><svg><use href="#i-vol-up"/></svg></button>
@@ -528,6 +529,16 @@
               <button id="import-channels" class="key" type="button">Import channels</button>
             </div>
             <input id="import-file" type="file" accept=".json,application/json" hidden>
+          </div>
+
+          <div class="settings-block">
+            <h3>This TV</h3>
+            <label class="check-row" style="display:flex;align-items:flex-start;gap:10px;margin-top:10px">
+              <input id="power-volume" type="checkbox" checked>
+              <span>Show Turn on, Turn off and volume buttons
+                <small>Roku TVs always obey them. A Roku stick or box can only control the TV if the TV supports HDMI-CEC, which older TVs often don't. If pressing them does nothing on this TV, uncheck this to hide them.</small>
+              </span>
+            </label>
           </div>
 
           <div class="settings-block">
@@ -899,6 +910,9 @@ async function refresh() {
   try {
     const status = await api('/api/status?ip=' + encodeURIComponent(ip));
     if (!tv || tv.ip !== ip) return;
+    const powerVolume = status.powerVolume !== false;
+    document.body.classList.toggle('no-power-volume', !powerVolume);
+    $('power-volume').checked = powerVolume;
     $('helping-note').hidden = !status.helping;
     if (status.helping) $('helping-note').textContent = `${status.helping.name} is helping: ${status.helping.text}`;
     if (!status.reachable) {
@@ -1797,6 +1811,19 @@ $('lock-off').addEventListener('click', async () => {
   }
 });
 
+/* This TV: hide power and volume where the TV ignores them */
+$('power-volume').addEventListener('change', async () => {
+  const shown = $('power-volume').checked;
+  document.body.classList.toggle('no-power-volume', !shown);
+  try {
+    await api('/api/tv-options', { ip: tv.ip, powerVolume: shown });
+  } catch (err) {
+    $('power-volume').checked = !shown;
+    document.body.classList.toggle('no-power-volume', shown);
+    toast(err.message);
+  }
+});
+
 /* Family account: link this home to the family hub, so family members can help from anywhere */
 function renderFamily(family) {
   $('family-form').hidden = family.connected || Boolean(family.pairing);
@@ -2067,7 +2094,7 @@ document.addEventListener('keydown', (event) => {
   // Enter and Space on a focused button should press that button instead.
   if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('button')) return;
   const key = shortcuts[event.key.length === 1 ? event.key.toLowerCase() : event.key];
-  if (!key) return;
+  if (!key || (key.startsWith('Volume') && document.body.classList.contains('no-power-volume'))) return;
   event.preventDefault();
   send(key);
   const button = document.querySelector(`[data-key="${key}"]`);
