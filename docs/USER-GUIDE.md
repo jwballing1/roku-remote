@@ -14,6 +14,7 @@ the Roku remote hard to use.
 - [Schedules](#schedules)
 - [Choosing which TVs and apps show](#choosing-which-tvs-and-apps-show)
 - [Setting it up for someone else](#setting-it-up-for-someone-else)
+- [Helping from anywhere](#helping-from-anywhere)
 - [Settings](#settings)
 - [Troubleshooting](#troubleshooting)
 
@@ -56,10 +57,10 @@ On a phone, the same sections are stacked so you can scroll through them.
 
 | Section | What it does |
 |---|---|
-| **Turn on / Turn off** | Power. These work on Roku TVs. With a Roku stick, they only control the TV if it supports HDMI-CEC. |
+| **Turn on / Turn off** | Power. These work on Roku TVs. With a Roku stick, they only control the TV if it supports HDMI-CEC. You can hide them for a TV that ignores them: see [This TV](#this-tv). |
 | **Back, Home, arrows, OK** | The same as the physical remote |
 | **Replay, Options, playback** | Instant replay, the star (Options) button, rewind, play/pause and fast forward |
-| **Volume** | Works on Roku TVs. With a stick, it depends on the TV, the same as power. |
+| **Volume** | Works on Roku TVs. With a stick, it depends on the TV, the same as power, and can be hidden the same way. |
 | **TVs** | Switch between your Roku devices |
 | **Channels** | One-tap buttons that go to a channel. See below. |
 | **Apps** | Open any app on the Roku |
@@ -157,6 +158,8 @@ Changes to a button shared by several TVs apply on all of them.
   **"... updated. Record again if it misses."**. Playing it successfully clears the warning, and alert
   emails mention the update. The warning doesn't show in the locked view.
 
+<img src="images/17-update-warning.png" alt="A channel button warning that its app was updated" width="600">
+
 ---
 
 ## Schedules
@@ -170,6 +173,8 @@ example, the news every weekday morning in the living room and the den.
 3. Under **TVs**, check every TV it should play on. Only TVs that have the channel can be checked.
 4. Choose **Save schedule**.
 
+<img src="images/19-schedule-edit.png" alt="Adding a schedule" width="600">
+
 So a schedule never surprises anyone watching, it skips a TV when:
 - the TV is a Roku TV that's turned off (schedules never turn a TV on)
 - the TV doesn't answer, for example because its stick has no power
@@ -179,6 +184,8 @@ So a schedule never surprises anyone watching, it skips a TV when:
 Each schedule shows what happened on each TV the last time it ran, such as "Den: Played" or
 "Family room: Skipped: something was already playing". If a scheduled button fails or no video starts,
 email alerts are sent as usual. Uncheck the box next to a schedule to pause it without deleting it.
+
+<img src="images/18-schedules.png" alt="Schedules, with the last run of each" width="600">
 
 Schedules play only while TV Remote is running, on the computer that runs the website or in the
 Windows app, and they use that computer's clock. The website and the Windows app keep separate
@@ -196,8 +203,8 @@ add it back, but **+ Add a TV** will.
 <img src="images/11-edit-tvs.png" alt="Removing a TV" width="380">
 
 ### Apps
-Choose **Edit** in the Apps section, and uncheck the apps you don't want to see. This is saved for
-each TV. Channel buttons can still use hidden apps.
+Choose **Edit** in the Apps section, and uncheck the apps you don't want to see. **Select all** turns
+every app on or off at once. This is saved for each TV. Channel buttons can still use hidden apps.
 
 <img src="images/12-apps.png" alt="The Apps section" width="380"> <img src="images/13-choose-apps.png" alt="Choosing apps to show" width="380">
 
@@ -223,6 +230,79 @@ computer.
 They still turn the TV on with its own remote or button, unless it's a Roku TV, which TV Remote can
 turn on itself.
 
+To help them from another house, see [Helping from anywhere](#helping-from-anywhere).
+
+---
+
+## Helping from anywhere
+
+With a **family hub**, invited family members can use a relative's remote from anywhere: play
+channels, press buttons, and change buttons, schedules and settings. They need nothing installed,
+only a web browser on a phone, tablet or computer. Setting up the hub itself is covered in
+[hub/README.md](../hub/README.md).
+
+How it fits together:
+- **At the relative's home,** TV Remote stays running on a computer that doesn't sleep. It's linked to
+  the hub once, and connects out to it. Nothing changes on that home's router.
+- **Everyone else** goes to the hub's address, like `https://yourname.ddns.net:8444`, and signs in
+  with an email and password.
+
+### Signing in
+Open the hub's address and sign in. Each phone or computer stays signed in for 90 days.
+
+<img src="images/23-hub-sign-in.png" alt="Signing in to the family hub" width="320">
+
+### Linking a home (once)
+1. At the relative's computer, in TV Remote, open **Settings**, then **Family account**. Enter the
+   hub's address and choose **Connect**. A 6-digit code appears.
+2. On the hub, under **Link a home**, enter the code and a name, like "Aunt Gail's home". You become
+   that home's owner.
+
+See [Family account](#family-account) for the TV Remote side.
+
+### Using the remote
+On the hub, choose **Open remote** on the home. It's the same remote as at the home, with a purple
+**Controlling** bar at the top, showing whose TVs you're controlling. If you help more than one home,
+switch between them there. Everything you press happens on **their** TVs.
+
+![The remote, opened through the family hub](images/25-hub-remote.png)
+
+On their screen, a green note shows who's helping and what they did:
+
+<img src="images/22-helping.png" alt="The note on the relative's screen when family are helping" width="320">
+
+Changes made through the hub, like a new channel button or hidden apps, appear on their screen
+within a few seconds, without anyone reloading it.
+
+### Inviting family
+1. On the hub, choose **Manage** on the home.
+2. Under **Invite someone**, choose **Helper** or **Owner**, then **Create invite link**, then **Copy link**.
+3. Send them the link by text or email. It works once, for 7 days.
+
+<img src="images/24-hub-homes.png" alt="Managing a home: invites, people and recent activity" width="560">
+
+When they open the link, they enter their name and email and choose a password. After that, they sign
+in with those. The name they choose is the one shown on the relative's screen.
+
+<img src="images/26-hub-join.png" alt="Joining from an invite link" width="320">
+
+| Role | Can |
+|---|---|
+| **Helper** | Use the remote, play channels, and change buttons, schedules, which apps show, and power and volume |
+| **Owner** | Everything a helper can, plus invite and remove people, remove TVs, change the lock and email alerts, and remove the home |
+
+Nobody can search the home's network, export or import channel files, or change the Family account
+link from the hub. Those only work at the home.
+
+### People, passwords and activity
+Under **Manage**, owners can also:
+- **See recent activity,** such as "Bryan: Pressed OK on Family room".
+- **Reset someone's password:** choose **Reset password** next to them, and send them the link. It
+  works once, for 3 days.
+- **Remove someone,** which ends their access straight away.
+
+Anyone can change their own password with **Change password** at the top of the hub page.
+
 ---
 
 ## Settings
@@ -237,6 +317,14 @@ Settings are at the bottom of the full remote, and closed until you open them.
 **Export channels** saves this TV's buttons to a file. **Import channels** adds buttons from a file,
 updating matching ones and leaving the rest. Use this to back up buttons, or to copy them between
 the website and the Windows app.
+
+### This TV
+**Show Turn on, Turn off and volume buttons** is saved separately for each TV. Roku TVs always obey
+these buttons. A Roku stick or box can only control the TV if the TV supports HDMI-CEC, which older
+TVs often don't, and which can't be checked automatically. So press them once on each TV. If nothing
+happens, uncheck this, and the buttons are hidden for that TV.
+
+<img src="images/20-this-tv.png" alt="The This TV setting" width="380">
 
 ### Lock view
 Choose a 4 to 12 digit PIN and choose **Lock**. To turn it off for everyone, unlock first, then choose
@@ -256,14 +344,15 @@ most one email per problem every 30 minutes.
 Alerts can't report that TV Remote itself, the computer running it, or the internet is down.
 
 ### Family account
-If your family runs a TV Remote family hub (see [hub/README.md](../hub/README.md)), invited family
-members can use this remote from anywhere. They can play channels, press buttons, and change buttons
-and schedules.
+If your family runs a TV Remote family hub, invited family members can use this remote from anywhere.
+See [Helping from anywhere](#helping-from-anywhere).
 
 1. Under **Family account**, enter the hub's address, and choose **Connect**.
 2. A 6-digit code appears. Someone signed in to the hub enters it under **Link a home**, within 10
    minutes.
 3. TV Remote shows **Connected**. The hub's owners can then invite other family members.
+
+<img src="images/21-family-account.png" alt="The linking code in Family account" width="380">
 
 While a family member is helping, a green note at the top of the screen says who, and what they did,
 like **"Nephew is helping: Played MeTv on Den"**. To end remote access, choose **Disconnect**.
@@ -283,5 +372,8 @@ This computer has to stay on, with TV Remote running, for family to reach it.
 | **"The app didn't open within 45 seconds"** | Check that the app still opens from the Roku home screen. It may be updating, or need you to sign in again. |
 | **A schedule didn't play** | Check its last run. TV Remote must be running at the scheduled time, and TVs that are off or already playing something are skipped. |
 | **"Nothing seems to be playing"** | Press **Start over** and try again. If it keeps happening, the button needs fixing. For menu buttons, turn off **Check that video starts**. |
-| **Turn on, Turn off or volume do nothing** | With a Roku stick, these only work if the TV supports HDMI-CEC. Use the TV's own remote or buttons. |
-| **Forgot the lock PIN** | Someone with access to the computer running TV Remote can clear the lock in `settings.json`. |
+| **Turn on, Turn off or volume do nothing** | With a Roku stick, these only work if the TV supports HDMI-CEC, which can't be checked automatically. Use the TV's own remote or buttons. To hide these buttons for that TV, uncheck **Settings, then This TV, then Show Turn on, Turn off and volume buttons**. |
+| **Forgot the lock PIN** | Someone with access to the computer running TV Remote can clear the lock in `settings.json`. A hub owner can also turn the lock off from the hub, without the PIN. |
+| **The hub says the home "isn't connected right now"** | TV Remote at the home must be running, on a computer that's awake and online. Its **Family account** setting shows whether it's connected. |
+| **Forgot your hub password** | Ask a home owner for a reset link. The hub's owner can reset their own password on the hub's setup page. |
+| **An invite or reset link doesn't work** | They work once, and expire: invites after 7 days, reset links after 3. Ask for a new one. |
