@@ -5,7 +5,7 @@ Anything not listed, like searching the home network or exporting files, never w
 """
 HELPER = {
     ("GET", "/api/saved"), ("GET", "/api/settings"), ("GET", "/api/status"), ("GET", "/api/apps"),
-    ("GET", "/api/channels"), ("GET", "/api/icon"), ("GET", "/api/schedules"),
+    ("GET", "/api/channels"), ("GET", "/api/icon"), ("GET", "/api/schedules"), ("GET", "/api/direct-channels"),
     ("POST", "/api/select"), ("POST", "/api/key"), ("POST", "/api/launch"), ("POST", "/api/power-on"),
     ("POST", "/api/start-over"), ("POST", "/api/settings"), ("POST", "/api/apps/hidden"), ("POST", "/api/tv-options"),
     ("POST", "/api/channels/open"), ("POST", "/api/channels/save"), ("POST", "/api/channels/reorder"),

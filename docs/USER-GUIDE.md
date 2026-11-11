@@ -118,6 +118,17 @@ on until you choose **Show full remote**.
 You can also type letters, such as `metv`, to fill in an app's search box, and move or remove any
 press with the arrow and **×** buttons.
 
+### Channels that open directly (Pluto TV)
+Some apps can open straight onto a channel, with no menus or button presses. For those apps, the
+editor shows a **channel list** instead of button presses: search for the channel, like
+`andy griffith`, and choose it. The button's name fills in from the channel, and you can change it.
+
+The button then opens the app right on that channel, whatever was playing before, and still checks
+that video starts. There's nothing to record, so these buttons don't break when the app changes its
+menus.
+
+So far this works with **Pluto TV**. Other apps, like Frndly TV and YouTube TV, use button presses.
+
 To put a button on some TVs only, open **TVs**, uncheck **All TVs**, and check the TVs you want.
 The TV you're using is always included.
 

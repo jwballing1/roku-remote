@@ -643,7 +643,51 @@ def clean_channel(data):
         "isShortcut": bool(data.get("isShortcut")),
         "steps": steps,
         "appVersions": versions,  # TV key -> the app's version when this button last worked there
+        **direct_link(data),
     }
+
+
+# Apps confirmed to open straight onto a channel when launched with its ID. Their buttons pick a
+# channel from a list instead of recording presses. Others ignore these links, so they record.
+DIRECT_APPS = {
+    "74519": {"name": "Pluto TV", "mediaType": "live"},
+}
+DIRECT_CACHE_SECONDS = 12 * 3600
+direct_cache = {}  # app id -> (time fetched, channels)
+CONTENT_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def direct_link(data):
+    """The channel's ID in its app, for buttons that open it directly. Empty for recorded buttons."""
+    content_id = str(data.get("contentId") or "")
+    if not content_id:
+        return {}
+    if not CONTENT_ID.match(content_id) or str(data.get("appId")) not in DIRECT_APPS:
+        raise TvError("That channel couldn't be saved because its details are invalid.")
+    return {"contentId": content_id, "mediaType": DIRECT_APPS[str(data["appId"])]["mediaType"]}
+
+
+def direct_channels(app_id):
+    """The channels an app can open directly, from its public channel list, cached for a while."""
+    if app_id not in DIRECT_APPS:
+        raise TvError("That app can't open channels directly.")
+    cached = direct_cache.get(app_id)
+    if cached and time.time() - cached[0] < DIRECT_CACHE_SECONDS:
+        return cached[1]
+    try:
+        request = urllib.request.Request("https://api.pluto.tv/v2/channels", headers={"User-Agent": "TVRemote"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            listing = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, http.client.HTTPException):
+        if cached:
+            return cached[1]  # An older copy is better than nothing.
+        raise TvError("Couldn't get Pluto TV's channel list. Check this computer's internet connection, then try again.")
+    channels = sorted(
+        ({"id": c["_id"], "name": str(c.get("name", "")).strip()[:80], "number": c.get("number") or 0}
+         for c in listing if isinstance(c, dict) and CONTENT_ID.match(str(c.get("_id", ""))) and c.get("name")),
+        key=lambda c: (c["number"] or 99999, c["name"].lower()))
+    direct_cache[app_id] = (time.time(), channels)
+    return channels
 
 
 def tv_has_app(ip, app_id):
@@ -796,7 +840,7 @@ def wait_for_app(ip, app_id, cancel):
             return False
 
 
-def open_app_fresh(ip, app_id, cancel, reset=False, wait_ms=0):
+def open_app_fresh(ip, app_id, cancel, reset=False, wait_ms=0, link=""):
     """Go home first, so recording and playback both start from the same place.
 
     Returns once the Roku reports the app open, so the wait for its menus counts
@@ -810,7 +854,7 @@ def open_app_fresh(ip, app_id, cancel, reset=False, wait_ms=0):
         return False
     path = "/launch/" + urllib.parse.quote(str(app_id), safe="")
     if not reset:
-        ecp(ip, path, "POST")
+        ecp(ip, path + (f"?{link}" if link else ""), "POST")  # A direct link goes straight to the channel.
         return wait_for_app(ip, app_id, cancel)
     ecp(ip, path + "?contentId=reset&mediaType=live", "POST")
     if not wait_for_app(ip, app_id, cancel) or cancel.wait(wait_ms / 1000):
@@ -905,8 +949,9 @@ def video_playing(ip, cancel):
 
 
 def run_channel(ip, channel, cancel):
-    reset = channel.get("resetFirst", False)
-    if not open_app_fresh(ip, channel["appId"], cancel, reset, channel.get("openDelayMs", 0)):
+    link = urllib.parse.urlencode({"contentId": channel["contentId"], "mediaType": channel.get("mediaType", "live")})         if channel.get("contentId") else ""
+    reset = channel.get("resetFirst", False) and not link
+    if not open_app_fresh(ip, channel["appId"], cancel, reset, channel.get("openDelayMs", 0), link):
         return {"stopped": True}
     # Channels saved before this setting existed keep their app wait in the first step's delay.
     if not reset and channel["steps"] and cancel.wait(channel.get("openDelayMs", 0) / 1000):
@@ -1420,7 +1465,9 @@ class Handler(BaseHTTPRequestHandler):
                     result["helping"] = helping
                 self.send_json(result)
             elif url.path == "/api/apps":
-                self.send_json({"apps": apps(query.get("ip")), "hidden": hidden_apps(query.get("ip"))})
+                self.send_json({"apps": apps(query.get("ip")), "hidden": hidden_apps(query.get("ip")), "direct": DIRECT_APPS})
+            elif url.path == "/api/direct-channels":
+                self.send_json({"channels": direct_channels(str(query.get("app", "")))})
             elif url.path == "/api/channels":
                 self.send_json({"channels": channels_for(query.get("ip"))})
             elif url.path == "/api/channels/export":

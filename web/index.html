@@ -197,6 +197,9 @@
 
   body.remote .local-only { display: none !important; }
   body.no-power-volume .power-volume { display: none; }
+  #add-channel:not(.direct) .direct-only, #add-channel.direct .press-only { display: none !important; }
+  .direct-list { height: auto; padding: 4px; }
+  .direct-list option { padding: 6px 8px; border-radius: 6px; }
   .family-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; padding: 10px 12px; background: #2b2552; border: 1px solid var(--accent); border-radius: 12px; }
   .family-bar label { margin: 0; font-size: 14px; font-weight: 600; }
   .family-bar select { flex: 1 1 160px; width: auto; padding: 6px 10px; }
@@ -398,7 +401,14 @@
                 <div id="tv-select-menu" class="tv-select-menu"></div>
               </details>
             </div>
-            <div class="delay-row">
+            <div id="direct-section" class="direct-only">
+              <span class="field-label">Channel</span>
+              <p class="muted">This app opens channels directly, so there are no button presses to record. Choose the channel.</p>
+              <input id="direct-search" class="field" placeholder="Search, like Andy Griffith" aria-label="Search channels" autocomplete="off">
+              <select id="direct-channel" class="field direct-list" size="8" aria-label="Channel"></select>
+              <p id="direct-note" class="muted" role="status"></p>
+            </div>
+            <div class="delay-row press-only">
               <label>Wait after the app opens (seconds)
                 <input id="open-delay" class="field" type="number" min="0" max="120" step="any" value="8" required>
               </label>
@@ -406,7 +416,7 @@
                 <input id="step-gap" class="field" type="number" min="0.3" max="60" step="any" value="1" required>
               </label>
             </div>
-            <button id="gap-all" class="link gap-all" type="button">Use this delay for every press</button>
+            <button id="gap-all" class="link gap-all press-only" type="button">Use this delay for every press</button>
             <label class="check-row">
               <input id="is-shortcut" type="checkbox">
               <span>This isn't a channel
@@ -419,13 +429,14 @@
                 <small>Warns the viewer and emails alerts if nothing plays. Turn this off for channels that just open a menu, like a guide.</small>
               </span>
             </label>
-            <label class="check-row">
+            <label class="check-row press-only">
               <input id="reset-first" type="checkbox">
               <span>Start from the app's home screen
                 <small>Clears where the app was left, so the presses always start from its top menu. Works with Frndly TV. Other apps may not support it, so test first.</small>
               </span>
             </label>
 
+            <div class="press-only">
             <h3>Button presses</h3>
             <ol id="steps" class="steps"></ol>
             <p id="steps-empty" class="muted">None yet. Tap the buttons below to add them. Nothing is sent to the TV while you do this.</p>
@@ -443,11 +454,12 @@
               <input id="step-text" class="field" placeholder="Letters to type, like metv" aria-label="Letters to type" autocomplete="off" autocapitalize="off">
               <button id="step-text-add" class="key" type="button">Add</button>
             </div>
+            </div>
 
             <div class="form-buttons">
               <button class="primary" id="draft-save">Save</button>
               <button class="primary" id="draft-try">Save and try</button>
-              <button id="draft-record" class="text-btn" type="button">Record on TV instead</button>
+              <button id="draft-record" class="text-btn press-only" type="button">Record on TV instead</button>
               <button id="add-cancel" class="text-btn" type="button">Cancel</button>
             </div>
           </form>
@@ -669,6 +681,8 @@ let lockIsOn = false;
 let unlockedHere = REMOTE;  // Only this device: a relative helping remotely doesn't unlock the viewer's screen.
 let familyTimer = null;
 let homeName = '';
+let directApps = {};      // App id -> how it opens channels directly, for apps that can
+let directLists = {};     // App id -> its channel list, once fetched
 let dataVersion = null;   // The server's change counter when this screen last loaded apps, channels and settings
 let alertsEnabled = false;
 let alertsFormEdited = false;
@@ -950,9 +964,11 @@ async function refresh() {
 async function loadApps(ip) {
   const grid = $('apps');
   try {
-    const { apps, hidden } = await api('/api/apps?ip=' + encodeURIComponent(ip));
+    const data = await api('/api/apps?ip=' + encodeURIComponent(ip));
+    const { apps, hidden } = data;
     appsList = apps;
     hiddenApps = new Set(hidden);
+    directApps = data.direct || {};
     appsLoadedFor = ip;
     editingApps = false;
     renderApps();
@@ -1195,6 +1211,7 @@ function channelEditor(channel) {
   again.type = 'button';
   again.textContent = 'Record again';
   again.addEventListener('click', () => startRecording(channel));
+  again.hidden = Boolean(channel.contentId);
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'danger';
@@ -1282,6 +1299,8 @@ function openEditor(channel, asCopy = false) {
     // New channels go on every TV unless changed here.
     allTvs: channel ? Boolean(channel.allTvs) : true,
     tvKeys: new Set(channel?.devices || []),
+    contentId: channel?.contentId || '',
+    autoName: '',  // The name filled in from the chosen channel, so choosing another can replace it
   };
   editingChannels = false;
   const select = $('channel-app');
@@ -1308,7 +1327,42 @@ function openEditor(channel, asCopy = false) {
   $('add-channel').hidden = false;
   renderTvTabs();
   renderSteps();
+  $('direct-search').value = '';
+  updateEditorMode();
   $('channel-name').focus();
+}
+
+/* Apps that open channels directly get a channel list instead of button presses */
+async function updateEditorMode() {
+  const appId = $('channel-app').value;
+  const direct = Boolean(directApps[appId]);
+  $('add-channel').classList.toggle('direct', direct);
+  if (!direct) return;
+  if (!directLists[appId]) {
+    $('direct-note').textContent = 'Getting the channel list…';
+    $('direct-channel').replaceChildren();
+    try {
+      directLists[appId] = (await api('/api/direct-channels?app=' + encodeURIComponent(appId))).channels;
+    } catch (err) {
+      $('direct-note').textContent = err.message;
+      return;
+    }
+  }
+  if (!draft || $('channel-app').value !== appId) return;
+  renderDirectChannels();
+}
+
+function renderDirectChannels() {
+  const list = directLists[$('channel-app').value] || [];
+  const words = $('direct-search').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = list.filter((c) => words.every((w) => c.name.toLowerCase().includes(w)));
+  // Keep the chosen channel in the list, even when the search hides it.
+  const chosen = list.find((c) => c.id === draft.contentId);
+  const shown = chosen && !matches.includes(chosen) ? [chosen, ...matches] : matches;
+  $('direct-channel').replaceChildren(...shown.slice(0, 1000).map((c) => new Option(c.name, c.id)));
+  $('direct-channel').value = draft.contentId;
+  $('direct-note').textContent = draft.contentId && chosen ? `Chosen: ${chosen.name}`
+    : shown.length ? `${matches.length} channel${matches.length === 1 ? '' : 's'}${words.length ? ' found' : ''}. Choose one.` : 'No channels match that search.';
 }
 
 function closeEditor() {
@@ -1397,6 +1451,10 @@ async function saveDraft(andTry) {
     isShortcut: $('is-shortcut').checked,
     steps: draft.steps,
   };
+  if (directApps[channel.appId]) {
+    if (!draft.contentId) { toast('Choose a channel from the list.'); $('direct-search').focus(); return; }
+    Object.assign(channel, { contentId: draft.contentId, steps: [], openDelayMs: 0, resetFirst: false });
+  }
   if (!channel.name) { $('channel-name').focus(); return; }
   try {
     const saved = await api('/api/channels/save', { ip: tv.ip, channel, tvs: selectedTvs() });
@@ -2004,7 +2062,22 @@ $('draft-record').addEventListener('click', () => {
 document.querySelectorAll('[data-add]').forEach((button) => {
   button.addEventListener('click', () => addStep(button.dataset.add));
 });
+$('direct-search').addEventListener('input', () => { if (draft) renderDirectChannels(); });
+$('direct-channel').addEventListener('change', () => {
+  const list = directLists[$('channel-app').value] || [];
+  const chosen = list.find((c) => c.id === $('direct-channel').value);
+  if (!chosen) return;
+  draft.contentId = chosen.id;
+  // Name the button after the channel, unless it's been given a name of its own.
+  const name = $('channel-name').value.trim();
+  if (!name || name === draft.autoName) {
+    draft.autoName = chosen.name.slice(0, 40);
+    $('channel-name').value = draft.autoName;
+  }
+  renderDirectChannels();
+});
 $('channel-app').addEventListener('change', () => {
+  if (draft) { draft.contentId = ''; updateEditorMode(); }
   if (draft && !draft.id) $('reset-first').checked = RESET_APPS.has($('channel-app').value);
 });
 $('gap-all').addEventListener('click', () => {
