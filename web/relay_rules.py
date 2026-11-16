@@ -11,6 +11,8 @@ HELPER = {
     ("POST", "/api/channels/open"), ("POST", "/api/channels/save"), ("POST", "/api/channels/reorder"),
     ("POST", "/api/channels/delete"), ("POST", "/api/channels/play"), ("POST", "/api/channels/stop"),
     ("POST", "/api/schedules/save"), ("POST", "/api/schedules/delete"),
+    # Video calls: family can start, check on and end a call. Answering only works at the home itself.
+    ("GET", "/api/call"), ("POST", "/api/call/start"), ("POST", "/api/call/end"),
 }
 OWNER = HELPER | {
     ("POST", "/api/tvs/remove"), ("POST", "/api/lock"), ("POST", "/api/alerts"), ("POST", "/api/alerts/test"),

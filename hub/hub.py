@@ -511,7 +511,8 @@ def relay(user, home_id, method, path, body):
     """Send one remote-page request to a home and wait for its answer."""
     role = require_role(user, home_id)
     if not relay_rules.allowed(role, method, path):
-        raise HubError("That can't be done remotely." if role == "owner" else "Only the home's owners can do that.", 403)
+        owner_only = relay_rules.allowed("owner", method, path)
+        raise HubError("Only the home's owners can do that." if owner_only else "That can't be done remotely.", 403)
     home = query("SELECT * FROM homes WHERE id = ?", (home_id,), one=True)
     if not is_online(home_id, home["last_seen"]):
         raise HubError(f"{home['name']} isn't connected right now. TV Remote there may be closed, "

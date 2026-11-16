@@ -305,6 +305,26 @@ in with those. The name they choose is the one shown on the relative's screen.
 Nobody can search the home's network, export or import channel files, or change the Family account
 link from the hub. Those only work at the home.
 
+### Video calls
+Family members can video call the home from the remote page on the hub:
+
+1. Choose **Video call** in the purple bar at the top. The first time, the browser asks to use the
+   camera and microphone. Allow it.
+2. At the home, TV Remote shows **"Bryan is calling"** full-screen, with big **Answer** and
+   **Decline** buttons and a ringing sound.
+3. When they choose **Answer**, the call starts: the caller fills the screen, with their own picture
+   small in the corner. Either side can choose **Hang up**.
+
+Good to know:
+- **Only someone at the home can answer.** Nobody can turn on the home's camera from the hub. An
+  unanswered call stops ringing after 45 seconds, and shows as a missed call.
+- **At the home, calls work in the Windows app,** with a webcam and microphone on that computer. It
+  uses them without asking each time, since choosing Answer is the permission. The iPad isn't
+  supported yet.
+- **The video goes directly between the two devices.** Most home connections allow that. If a call
+  shows "The video couldn't connect", the networks at one end are blocking it.
+- **Only one call at a time,** and calls appear in the home's activity list.
+
 ### People, passwords and activity
 Under **Manage**, owners can also:
 - **See recent activity,** such as "Bryan: Pressed OK on Family room".

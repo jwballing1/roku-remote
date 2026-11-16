@@ -10,8 +10,13 @@ $Python = Join-Path $Venv "Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $Python)) {
     Write-Host "Setting up the build environment in .venv..."
     python -m venv $Venv
-    & $Python -m pip install --quiet --disable-pip-version-check pywebview pyinstaller
-    if ($LASTEXITCODE -ne 0) { throw "Installing pywebview and pyinstaller failed." }
+}
+# certifi is the standard list of trusted certificate authorities. Bundling it means the app can reach the
+# family hub even on PCs whose own Windows list is missing Let's Encrypt's root.
+& $Python -c "import importlib.util, sys; sys.exit(0 if all(importlib.util.find_spec(m) for m in ('webview', 'PyInstaller', 'certifi')) else 1)"
+if ($LASTEXITCODE -ne 0) {
+    & $Python -m pip install --quiet --disable-pip-version-check pywebview pyinstaller certifi
+    if ($LASTEXITCODE -ne 0) { throw "Installing pywebview, pyinstaller and certifi failed." }
 }
 
 Write-Host "Building TV Remote.exe..."
@@ -19,6 +24,8 @@ Write-Host "Building TV Remote.exe..."
     --icon (Join-Path $Root "icon.ico") `
     --add-data "$(Join-Path $Web 'index.html');." `
     --paths $Web `
+    --hidden-import certifi `
+    --collect-data certifi `
     --distpath (Join-Path $Root "dist") `
     --workpath (Join-Path $Root "build") `
     --specpath (Join-Path $Root "build") `

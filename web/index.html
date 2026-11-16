@@ -255,6 +255,21 @@
   .manual { display: flex; gap: 8px; margin-top: 8px; }
   label { display: block; font-size: 14px; margin-top: 20px; }
 
+  .call { position: fixed; inset: 0; z-index: 50; background: #0b0c10; color: var(--text); display: flex; align-items: center; justify-content: center; }
+  .call-ringing { text-align: center; padding: 24px; }
+  .call-title { margin: 0; font-size: 34px; font-weight: 700; }
+  .call-sub { margin: 8px 0 32px; font-size: 20px; color: var(--muted); }
+  .call-buttons { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+  .call-buttons button, .call-hangup { min-width: 180px; min-height: 76px; border: 0; border-radius: 40px; font-size: 26px; font-weight: 700; color: #fff; }
+  .call-answer { background: #16a34a; animation: call-pulse 1.2s ease-in-out infinite; }
+  .call-decline, .call-hangup { background: #dc2626; }
+  @keyframes call-pulse { 50% { transform: scale(1.06); } }
+  .call-live { position: absolute; inset: 0; }
+  #call-remote { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  #call-self { position: absolute; right: 16px; top: 16px; width: min(28vw, 240px); border-radius: 12px; border: 2px solid var(--line); background: #000; }
+  .call-status { position: absolute; left: 0; right: 0; top: 40%; margin: 0; text-align: center; font-size: 26px; }
+  .call-hangup { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); }
+
   #toast {
     position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
     max-width: 480px; margin: 0 auto; padding: 12px 14px; border-radius: 10px;
@@ -303,6 +318,7 @@
     <div id="family-bar" class="family-bar" hidden>
       <label for="home-select">Controlling</label>
       <select id="home-select" class="field"></select>
+      <button id="call-start" class="primary" type="button">Video call</button>
       <a href="/" class="link">Family account</a>
     </div>
     <div id="helping-note" class="helping-note" role="status" hidden></div>
@@ -652,6 +668,23 @@
         <button id="unlock-cancel" class="key" type="button">Cancel</button>
       </form>
     </div>
+  </div>
+</div>
+
+<div id="call" class="call" role="dialog" aria-modal="true" aria-label="Video call" hidden>
+  <div id="call-ringing" class="call-ringing" hidden>
+    <p class="call-title"><span id="call-who"></span> is calling</p>
+    <p class="call-sub">A video call from your family</p>
+    <div class="call-buttons">
+      <button id="call-answer" class="call-answer" type="button">Answer</button>
+      <button id="call-decline" class="call-decline" type="button">Decline</button>
+    </div>
+  </div>
+  <div id="call-live" class="call-live" hidden>
+    <video id="call-remote" autoplay playsinline></video>
+    <video id="call-self" autoplay playsinline muted></video>
+    <p id="call-status" class="call-status" role="status"></p>
+    <button id="call-hangup" class="call-hangup" type="button">Hang up</button>
   </div>
 </div>
 
@@ -1942,6 +1975,179 @@ async function loadFamilyBar() {
   } catch {}
 }
 $('home-select').addEventListener('change', () => { location.href = `/home/${$('home-select').value}/`; });
+
+/* Video calls. A family member calls from the hub; the screen at home rings, and only someone there can answer.
+   TV Remote at home passes each side's connection details to the other; the video goes directly between them. */
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];  // Helps the two sides find a route to each other
+let activeCall = null;  // { id, side, pc, stream, timer, answered, offer }
+let ringTimer = null;
+
+function callScreen(mode) {
+  $('call').hidden = !mode;
+  $('call-ringing').hidden = mode !== 'ringing';
+  $('call-live').hidden = mode !== 'live';
+}
+
+function callStatus(text) {
+  $('call-status').textContent = text;
+}
+
+function startRinging() {
+  stopRinging();
+  const beep = () => {
+    try {
+      const audio = new AudioContext();
+      for (const [at, pitch] of [[0, 660], [0.45, 880]]) {
+        const tone = audio.createOscillator();
+        const volume = audio.createGain();
+        tone.frequency.value = pitch;
+        volume.gain.value = 0.15;
+        tone.connect(volume).connect(audio.destination);
+        tone.start(audio.currentTime + at);
+        tone.stop(audio.currentTime + at + 0.35);
+      }
+      setTimeout(() => audio.close(), 1500);
+    } catch {}
+  };
+  beep();
+  ringTimer = setInterval(beep, 2500);
+}
+
+function stopRinging() {
+  clearInterval(ringTimer);
+  ringTimer = null;
+}
+
+function finishCall(message) {
+  stopRinging();
+  if (activeCall) {
+    clearInterval(activeCall.timer);
+    activeCall.stream?.getTracks().forEach((track) => track.stop());
+    activeCall.pc?.close();
+  }
+  activeCall = null;
+  $('call-remote').srcObject = null;
+  $('call-self').srcObject = null;
+  callScreen(null);
+  if (message) toast(message, true);
+}
+
+function iceGathered(pc) {
+  return new Promise((resolve) => {
+    if (pc.iceGatheringState === 'complete') return resolve();
+    const timer = setTimeout(resolve, 4000);
+    pc.addEventListener('icegatheringstatechange', () => {
+      if (pc.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); }
+    });
+  });
+}
+
+async function openCamera() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch {
+    throw new Error("The camera or microphone couldn't be used. Check that one is connected and allowed, then try again.");
+  }
+}
+
+function connectMedia(stream) {
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+  pc.ontrack = (event) => { $('call-remote').srcObject = event.streams[0]; callStatus(''); };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed') callStatus("The video couldn't connect. Hang up and try again.");
+  };
+  $('call-self').srcObject = stream;
+  return pc;
+}
+
+function endedMessage(reason) {
+  return { 'No answer': 'No answer.', 'Declined': 'The call was declined.', 'Missed call': 'Missed call.',
+           'Cancelled': 'The call was cancelled.' }[reason] || 'The call ended.';
+}
+
+// A family member calls, from the remote page on the hub.
+async function startCall() {
+  if (activeCall) return;
+  activeCall = { side: 'caller' };
+  callScreen('live');
+  callStatus(`Calling ${homeName || 'home'}…`);
+  try {
+    activeCall.stream = await openCamera();
+    activeCall.pc = connectMedia(activeCall.stream);
+    await activeCall.pc.setLocalDescription(await activeCall.pc.createOffer());
+    await iceGathered(activeCall.pc);
+    const { id } = await api('/api/call/start', { offer: { type: 'offer', sdp: activeCall.pc.localDescription.sdp } });
+    if (!activeCall) return;
+    activeCall.id = id;
+    activeCall.timer = setInterval(checkCallerSide, 1500);
+  } catch (err) {
+    finishCall();
+    toast(err.message);
+  }
+}
+
+async function checkCallerSide() {
+  const call = activeCall;
+  const view = await api('/api/call').catch(() => null);
+  if (!view || activeCall !== call) return;
+  if (view.id !== call.id || view.status === 'ended' || view.status === 'none') return finishCall(endedMessage(view.reason));
+  if (view.answer && !call.answered) {
+    call.answered = true;
+    callStatus('Connecting…');
+    await call.pc.setRemoteDescription(view.answer).catch(() => callStatus("The video couldn't connect. Hang up and try again."));
+  }
+}
+
+// The screen at home: check for calls every couple of seconds.
+async function checkHomeSide() {
+  const view = await api('/api/call').catch(() => null);
+  if (!view) return;
+  if (!activeCall) {
+    if (view.status === 'ringing') {
+      activeCall = { side: 'home', id: view.id, offer: view.offer };
+      $('call-who').textContent = view.caller;
+      callScreen('ringing');
+      startRinging();
+    }
+    return;
+  }
+  if (view.id !== activeCall.id || view.status === 'ended' || view.status === 'none') {
+    finishCall(activeCall.answered ? 'The call ended.' : `Missed call from ${$('call-who').textContent}.`);
+  }
+}
+
+async function answerCall() {
+  const call = activeCall;
+  if (!call || call.answered) return;
+  call.answered = true;
+  stopRinging();
+  callScreen('live');
+  callStatus('Connecting…');
+  try {
+    call.stream = await openCamera();
+    call.pc = connectMedia(call.stream);
+    await call.pc.setRemoteDescription(call.offer);
+    await call.pc.setLocalDescription(await call.pc.createAnswer());
+    await iceGathered(call.pc);
+    await api('/api/call/answer', { id: call.id, answer: { type: 'answer', sdp: call.pc.localDescription.sdp } });
+  } catch (err) {
+    api('/api/call/end', { id: call.id }).catch(() => {});
+    finishCall();
+    toast(err.message);
+  }
+}
+
+function hangUp() {
+  if (activeCall?.id) api('/api/call/end', { id: activeCall.id }).catch(() => {});
+  finishCall();
+}
+
+$('call-start').addEventListener('click', startCall);
+$('call-answer').addEventListener('click', answerCall);
+$('call-decline').addEventListener('click', hangUp);
+$('call-hangup').addEventListener('click', hangUp);
+if (!REMOTE) setInterval(checkHomeSide, 2000);  // Even when minimized, so the ring can still be heard
 
 /* Email alerts */
 ['alert-emails', 'alert-provider', 'alert-host', 'alert-port', 'alert-security', 'alert-username', 'alert-password', 'alert-from'].forEach((id) => {

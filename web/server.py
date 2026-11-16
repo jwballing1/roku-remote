@@ -41,7 +41,8 @@ CHANNELS_FILE = STATE_FILE.with_name("channels.json")
 SETTINGS_FILE = STATE_FILE.with_name("settings.json")
 settings_lock = threading.Lock()
 GLOBAL_POSTS = {"/api/settings", "/api/lock", "/api/alerts", "/api/alerts/test", "/api/tvs/remove", "/api/schedules/save",
-                "/api/schedules/delete", "/api/family/connect", "/api/family/disconnect"}
+                "/api/schedules/delete", "/api/family/connect", "/api/family/disconnect",
+                "/api/call/start", "/api/call/answer", "/api/call/end"}
 EMAIL_PATTERN = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 ALERT_REPEAT_SECONDS = 30 * 60  # One email per problem per half hour, so a bad day doesn't flood inboxes.
 VIDEO_CHECK_SECONDS = 20
@@ -73,6 +74,25 @@ helping = {}                  # The latest thing a family member did remotely: {
 family_state = {"status": "", "pairing": None, "generation": 0, "port": None}
 family_lock = threading.Lock()
 family_wake = threading.Event()  # Cuts a retry wait short when the connection is turned off.
+
+def internet_tls():
+    """Certificate checks for TV Remote's own internet requests (the family hub, Pluto's channel list).
+
+    Windows' list of trusted authorities is used, plus the standard list from certifi when it's
+    available, as it is in the Windows app. Some PCs' Windows lists lack Let's Encrypt's root until a
+    browser happens to fetch it, which would otherwise make connecting to the family hub fail. The
+    checks themselves always stay on.
+    """
+    context = ssl.create_default_context()
+    try:
+        import certifi
+        context.load_verify_locations(cafile=certifi.where())
+    except (ImportError, OSError, ssl.SSLError):
+        pass
+    return context
+
+
+INTERNET_TLS = internet_tls()
 
 # Ignore any system proxy: the TV is always on the local network.
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -676,7 +696,7 @@ def direct_channels(app_id):
         return cached[1]
     try:
         request = urllib.request.Request("https://api.pluto.tv/v2/channels", headers={"User-Agent": "TVRemote"})
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=20, context=INTERNET_TLS) as response:
             listing = json.loads(response.read().decode("utf-8"))
     except (OSError, ValueError, http.client.HTTPException):
         if cached:
@@ -1195,7 +1215,7 @@ def hub_request(url, method="GET", data=None, token=None, timeout=15):
     body = json.dumps(data).encode() if data is not None else None
     request = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=INTERNET_TLS) as response:
             return json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as err:
         if err.code == 401:
@@ -1352,6 +1372,81 @@ def answer_family_request(family, request):
         pass
 
 
+# ----- Video calls: a family member calls this home through the hub, and the person here answers -----
+#
+# This server only passes the two sides' connection details between them (WebRTC offer and answer). The
+# video itself goes directly between the two browsers. Both sides check in every second or so: the
+# caller through the family hub, the screen here directly.
+
+CALL_RING_SECONDS = 45   # An unanswered call stops ringing after this
+CALL_LOST_SECONDS = 20   # A side that stops checking in this long has gone, so the call ends
+CALL_KEEP_SECONDS = 30   # How long an ended call stays visible, so both sides see how it ended
+MAX_SDP = 100000
+call_lock = threading.Lock()
+call = {}  # id, caller, status (ringing, active or ended), offer, answer, reason, started, ended, seen
+
+
+def finish_call(reason):
+    call.update(status="ended", reason=reason, ended=time.time())
+
+
+def call_view(side):
+    """The call as one side sees it ("caller" or "home"). Checking in also keeps the call going."""
+    with call_lock:
+        now = time.time()
+        if call.get("status") == "ended" and now - call["ended"] > CALL_KEEP_SECONDS:
+            call.clear()
+        if not call:
+            return {"status": "none"}
+        if call["status"] != "ended":
+            call["seen"][side] = now
+            other = "home" if side == "caller" else "caller"
+            if call["status"] == "ringing" and now - call["started"] > CALL_RING_SECONDS:
+                finish_call("No answer")
+            elif now - call["seen"][other] > CALL_LOST_SECONDS:
+                finish_call("Missed call" if call["status"] == "ringing" else "The call was lost")
+        view = {"id": call["id"], "caller": call["caller"], "status": call["status"], "reason": call.get("reason", "")}
+        if side == "home" and call["status"] == "ringing":
+            view["offer"] = call["offer"]
+        if side == "caller" and call.get("answer"):
+            view["answer"] = call["answer"]
+        return view
+
+
+def clean_sdp(value, kind):
+    if not isinstance(value, dict) or value.get("type") != kind or not isinstance(value.get("sdp"), str) \
+            or not 0 < len(value["sdp"]) <= MAX_SDP:
+        raise TvError("The call couldn't be set up.")
+    return {"type": kind, "sdp": value["sdp"]}
+
+
+def start_call(caller, offer):
+    offer = clean_sdp(offer, "offer")
+    with call_lock:
+        if call and call["status"] != "ended":
+            raise TvError("Someone is already on a call with this home. Try again in a minute.")
+        call.clear()
+        now = time.time()
+        call.update(id=uuid.uuid4().hex, caller=caller, status="ringing", offer=offer, answer=None,
+                    started=now, seen={"caller": now, "home": now})
+        return {"id": call["id"]}
+
+
+def answer_call(call_id, answer):
+    answer = clean_sdp(answer, "answer")
+    with call_lock:
+        if call.get("id") != call_id or call.get("status") != "ringing":
+            raise TvError("That call has ended.")
+        call.update(status="active", answer=answer, offer=None)
+
+
+def end_call(call_id, side):
+    with call_lock:
+        if call.get("id") == call_id and call["status"] != "ended":
+            finish_call("Declined" if side == "home" and call["status"] == "ringing" else
+                        "Cancelled" if call["status"] == "ringing" else "Hung up")
+
+
 def tv_name_for(ip):
     return next((tv["name"] for tv in load_settings()["tvs"] if tv["ip"] == ip), "the TV")
 
@@ -1376,6 +1471,7 @@ def describe_action(path, data):
         "/api/schedules/save": "Saved a schedule", "/api/schedules/delete": "Deleted a schedule",
         "/api/settings": "Changed the view", "/api/apps/hidden": "Changed which apps show", "/api/tvs/remove": "Removed a TV",
         "/api/tv-options": f"Changed whether power and volume show{on}",
+        "/api/call/start": "Started a video call", "/api/call/end": "Ended a video call",
         "/api/lock": "Changed the lock", "/api/alerts": "Changed email alerts", "/api/alerts/test": "Sent a test alert email",
     }.get(path)
 
@@ -1455,6 +1551,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(public_settings())
             elif url.path == "/api/schedules":
                 self.send_json(schedules_view())
+            elif url.path == "/api/call":
+                # Family members reach this through the hub; the screen at home checks it directly.
+                self.send_json(call_view("caller" if self.relay else "home"))
             elif url.path == "/api/status":
                 result = status(check_ip(query.get("ip")))
                 result["version"] = data_version
@@ -1501,6 +1600,17 @@ class Handler(BaseHTTPRequestHandler):
                     raise TvError("That TV isn't in the list.")
                 remove_tv(key)
                 return self.send_json({**public_settings(), "saved": load_saved()})
+            elif self.path == "/api/call/start":
+                if not self.relay:
+                    raise TvError("Calls are started by family members through the family hub.")
+                return self.send_json(start_call(self.relay[1], data.get("offer")))
+            elif self.path == "/api/call/answer":
+                # Only someone at the home can answer: the shared rules never let this come through the hub.
+                answer_call(str(data.get("id")), data.get("answer"))
+                return self.send_json({"ok": True})
+            elif self.path == "/api/call/end":
+                end_call(str(data.get("id")), "caller" if self.relay else "home")
+                return self.send_json({"ok": True})
             elif self.path == "/api/family/connect":
                 family_connect(data.get("hubUrl"))
             elif self.path == "/api/family/disconnect":
