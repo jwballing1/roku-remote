@@ -5,7 +5,7 @@ services:
     image: tvremote-hub
     restart: unless-stopped
     ports:
-      - "8443:8443"   # The family hub over HTTPS. The router forwards external 8443 here.
+      - "8444:8444"   # The family hub over HTTPS. Must match the port on the setup page; the router forwards it here.
       - "8088:80"     # Certificate checks. The router forwards external 80 here. (UGOS uses the NAS's own port 80.)
       - "8080:8080"   # The setup page, for the home network only. Never forward this on the router.
     volumes:

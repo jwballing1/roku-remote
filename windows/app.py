@@ -42,7 +42,20 @@ def allow_camera(window, origin):
     window.events.shown += on_shown
 
 
+def already_running():
+    """True if another copy of TV Remote is open on this PC. Two copies would both run schedules and
+    channel buttons on the same TVs, mixing their presses together."""
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # Reads Windows' error code safely.
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p)
+    already_running.handle = kernel32.CreateMutexW(None, False, "Local\\TVRemoteApp")  # Held until this copy closes.
+    return ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
+
+
 def main():
+    if already_running():
+        return  # The copy that's already open carries on; this one just closes.
     webview.settings["ALLOW_DOWNLOADS"] = True  # Lets Export channels save a file.
     # Port 0 picks any free port. 127.0.0.1 keeps it private to this PC.
     httpd = server.Server(("127.0.0.1", 0), server.Handler)

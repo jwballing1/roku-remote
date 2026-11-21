@@ -94,10 +94,15 @@ Open the setup page again, enter your setup password, change what you need, and 
 changes**. There's no need to rebuild anything.
 
 ### Updating the hub
-1. Run `build-image.ps1` again, and import the new `tvremote-hub.tar`.
-2. Recreate the container from the new image, with the same ports and the same `/data` folder.
+1. Run `build-image.ps1` again, and import the new `tvremote-hub.tar` under **Images**.
+2. If you created the hub as a **Project**: open the project and redeploy (rebuild) it. It picks up
+   the new image and keeps its ports and folder.
+   If you created a plain container: delete it and create it again from the new image, with the same
+   ports and the same NAS folder → `/data`.
 
-Settings, accounts, homes and certificates are all kept in `/data`, so they carry over.
+Settings, accounts, homes and certificates are all kept in the NAS folder mapped to `/data`, so they
+carry over. **Without that folder mapping,** they live inside the container and are lost when it's
+deleted, so everyone has to be linked again, and each fresh start requests a new HTTPS certificate.
 
 ## Link a home and invite family
 

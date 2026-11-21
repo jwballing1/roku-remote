@@ -198,6 +198,8 @@
   body.remote .local-only { display: none !important; }
   body.no-power-volume .power-volume { display: none; }
   #add-channel:not(.direct) .direct-only, #add-channel.direct .press-only { display: none !important; }
+  /* Without advanced editing, a new button is recorded on the TV: no hand-made steps or timings. */
+  #add-channel.simple .advanced-only, #add-channel.simple:not(.direct) .save-only { display: none !important; }
   .direct-list { height: auto; padding: 4px; }
   .direct-list option { padding: 6px 8px; border-radius: 6px; }
   .family-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; padding: 10px 12px; background: #2b2552; border: 1px solid var(--accent); border-radius: 12px; }
@@ -268,7 +270,29 @@
   #call-remote { width: 100%; height: 100%; object-fit: contain; background: #000; }
   #call-self { position: absolute; right: 16px; top: 16px; width: min(28vw, 240px); border-radius: 12px; border: 2px solid var(--line); background: #000; }
   .call-status { position: absolute; left: 0; right: 0; top: 40%; margin: 0; text-align: center; font-size: 26px; }
-  .call-hangup { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); }
+  .exit-app { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+  .exit-app-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 700; }
+  .exit-keys { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; padding: 0; list-style: none; }
+  .exit-keys li { display: flex; align-items: center; gap: 4px; padding: 4px 6px 4px 10px; border: 1px solid var(--line); border-radius: 16px; font-size: 14px; }
+  .exit-keys li button { border: 0; background: none; color: var(--muted); font-size: 16px; padding: 0 4px; cursor: pointer; }
+  .exit-palette { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .exit-palette .key { min-height: 36px; padding: 0 12px; font-size: 14px; }
+  .exit-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .exit-row input { width: 90px; }
+  .call-controls { position: absolute; left: 0; right: 0; bottom: 28px; display: flex; gap: 16px; justify-content: center; }
+  .call-mute { min-width: 150px; min-height: 76px; border: 0; border-radius: 40px; font-size: 26px; font-weight: 700;
+               background: rgba(255, 255, 255, 0.92); color: #111; }
+  .call-mute[aria-pressed="true"] { background: #f59e0b; }
+  .call-size { position: absolute; left: 16px; top: 16px; min-height: 52px; padding: 0 22px; border: 0; border-radius: 26px;
+               background: rgba(255, 255, 255, 0.92); color: #111; font-size: 20px; font-weight: 700; }
+  /* Small call window in the corner, so the remote can be used during a call */
+  .call.mini { inset: auto 16px 16px auto; width: min(380px, calc(100vw - 32px)); height: 250px; border-radius: 16px;
+               overflow: hidden; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55); border: 2px solid var(--line); }
+  .call.mini #call-self { width: 90px; right: 8px; top: 8px; border-radius: 8px; }
+  .call.mini .call-size { left: 8px; top: 8px; min-height: 40px; padding: 0 14px; font-size: 16px; }
+  .call.mini .call-controls { bottom: 10px; gap: 10px; }
+  .call.mini .call-hangup, .call.mini .call-mute { min-width: 110px; min-height: 44px; font-size: 18px; }
+  .call.mini .call-status { font-size: 16px; }
 
   #toast {
     position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
@@ -424,7 +448,7 @@
               <select id="direct-channel" class="field direct-list" size="8" aria-label="Channel"></select>
               <p id="direct-note" class="muted" role="status"></p>
             </div>
-            <div class="delay-row press-only">
+            <div class="delay-row press-only advanced-only">
               <label>Wait after the app opens (seconds)
                 <input id="open-delay" class="field" type="number" min="0" max="120" step="any" value="8" required>
               </label>
@@ -432,7 +456,7 @@
                 <input id="step-gap" class="field" type="number" min="0.3" max="60" step="any" value="1" required>
               </label>
             </div>
-            <button id="gap-all" class="link gap-all press-only" type="button">Use this delay for every press</button>
+            <button id="gap-all" class="link gap-all press-only advanced-only" type="button">Use this delay for every press</button>
             <label class="check-row">
               <input id="is-shortcut" type="checkbox">
               <span>This isn't a channel
@@ -452,7 +476,7 @@
               </span>
             </label>
 
-            <div class="press-only">
+            <div class="press-only advanced-only">
             <h3>Button presses</h3>
             <ol id="steps" class="steps"></ol>
             <p id="steps-empty" class="muted">None yet. Tap the buttons below to add them. Nothing is sent to the TV while you do this.</p>
@@ -473,8 +497,8 @@
             </div>
 
             <div class="form-buttons">
-              <button class="primary" id="draft-save">Save</button>
-              <button class="primary" id="draft-try">Save and try</button>
+              <button class="primary save-only" id="draft-save">Save</button>
+              <button class="primary save-only" id="draft-try">Save and try</button>
               <button id="draft-record" class="text-btn press-only" type="button">Record on TV instead</button>
               <button id="add-cancel" class="text-btn" type="button">Cancel</button>
             </div>
@@ -567,6 +591,26 @@
                 <small>Roku TVs always obey them. A Roku stick or box can only control the TV if the TV supports HDMI-CEC, which older TVs often don't. If pressing them does nothing on this TV, uncheck this to hide them.</small>
               </span>
             </label>
+          </div>
+
+          <div class="settings-block">
+            <h3>Channel buttons</h3>
+            <label class="check-row" style="display:flex;align-items:flex-start;gap:10px;margin-top:10px">
+              <input id="advanced-editing" type="checkbox">
+              <span>Show advanced editing
+                <small>Lets you build a button's steps and timings by hand when adding one, and adds Edit and Copy to each button when you press Edit. When this is off, new buttons are recorded on the TV, and a button can only be recorded again or deleted.</small>
+              </span>
+            </label>
+          </div>
+
+          <div class="settings-block" id="exit-block" hidden>
+            <h3>Leaving apps</h3>
+            <p class="muted">Some apps, like YouTube TV, only pause when Home is pressed, so they come back on the last channel. If one of these apps is on screen when a channel button is pressed, its presses below run first to exit it properly. They apply on every TV.</p>
+            <div id="exit-list"></div>
+            <div class="type-row">
+              <select id="exit-add-app" class="field" aria-label="App to add"></select>
+              <button id="exit-add" class="key" type="button">Add app</button>
+            </div>
           </div>
 
           <div class="settings-block">
@@ -684,7 +728,11 @@
     <video id="call-remote" autoplay playsinline></video>
     <video id="call-self" autoplay playsinline muted></video>
     <p id="call-status" class="call-status" role="status"></p>
-    <button id="call-hangup" class="call-hangup" type="button">Hang up</button>
+    <button id="call-size" class="call-size" type="button">Show remote</button>
+    <div class="call-controls">
+      <button id="call-mute" class="call-mute" type="button" aria-pressed="false">Mute</button>
+      <button id="call-hangup" class="call-hangup" type="button">Hang up</button>
+    </div>
   </div>
 </div>
 
@@ -710,6 +758,8 @@ let suppressChannelClick = false;
 let knownTvs = [];        // Every TV seen so far: { key, ip, name }
 let editingTvs = false;
 let channelsOnly = false;
+let exitSequences = {};      // App ID -> { appName, keys, gapMs }: presses that exit the app for real
+let advancedEditing = false;  // Edit and Copy for channel buttons; off by default, leaving Record again
 let lockIsOn = false;
 let unlockedHere = REMOTE;  // Only this device: a relative helping remotely doesn't unlock the viewer's screen.
 let familyTimer = null;
@@ -765,6 +815,15 @@ function send(key) {
 /* Saved view and the TV buttons */
 function applySettings(settings) {
   channelsOnly = settings.channelsOnly;
+  if (Boolean(settings.advancedEditing) !== advancedEditing) {
+    advancedEditing = Boolean(settings.advancedEditing);
+    if (editingChannels) renderChannels();
+  }
+  $('advanced-editing').checked = advancedEditing;
+  updateEditorSimple();
+  exitSequences = settings.exitSequences || {};
+  $('exit-block').hidden = !advancedEditing;
+  renderExitSequences();
   knownTvs = settings.tvs;
   lockIsOn = settings.locked;
   alertsEnabled = settings.alerts.emails.length > 0 && Boolean(settings.alerts.host);
@@ -1000,6 +1059,7 @@ async function loadApps(ip) {
     const data = await api('/api/apps?ip=' + encodeURIComponent(ip));
     const { apps, hidden } = data;
     appsList = apps;
+    renderExitSequences();
     hiddenApps = new Set(hidden);
     directApps = data.direct || {};
     appsLoadedFor = ip;
@@ -1233,12 +1293,12 @@ function channelEditor(channel) {
   rename.type = 'button';
   rename.textContent = 'Edit name, TVs & steps';
   rename.addEventListener('click', () => openEditor(channel));
-  actions.append(rename);
   const copy = document.createElement('button');
   copy.type = 'button';
   copy.textContent = 'Copy';
   copy.addEventListener('click', () => openEditor(channel, true));
-  actions.append(copy);
+  // Editing steps by hand and copying are advanced, so they only show when turned on in Settings.
+  if (advancedEditing) actions.append(rename, copy);
   const shared = channel.devices.length > 1;
   const again = document.createElement('button');
   again.type = 'button';
@@ -1329,9 +1389,9 @@ function openEditor(channel, asCopy = false) {
   draft = {
     id: asCopy ? undefined : channel?.id,
     steps,
-    // New channels go on every TV unless changed here.
-    allTvs: channel ? Boolean(channel.allTvs) : true,
-    tvKeys: new Set(channel?.devices || []),
+    // New channels, copies included, go on every TV unless changed here.
+    allTvs: channel && !asCopy ? Boolean(channel.allTvs) : true,
+    tvKeys: new Set(channel && !asCopy ? channel.devices || [] : []),
     contentId: channel?.contentId || '',
     autoName: '',  // The name filled in from the chosen channel, so choosing another can replace it
   };
@@ -1362,10 +1422,18 @@ function openEditor(channel, asCopy = false) {
   renderSteps();
   $('direct-search').value = '';
   updateEditorMode();
+  updateEditorSimple();
   $('channel-name').focus();
 }
 
 /* Apps that open channels directly get a channel list instead of button presses */
+// Without advanced editing, the editor only names the button and records it on the TV.
+function updateEditorSimple() {
+  $('add-channel').classList.toggle('simple', !advancedEditing);
+  $('draft-record').className = (advancedEditing ? 'text-btn' : 'primary') + ' press-only';
+  $('draft-record').textContent = advancedEditing ? 'Record on TV instead' : 'Record on TV';
+}
+
 async function updateEditorMode() {
   const appId = $('channel-app').value;
   const direct = Boolean(directApps[appId]);
@@ -1903,6 +1971,125 @@ $('lock-off').addEventListener('click', async () => {
 });
 
 /* This TV: hide power and volume where the TV ignores them */
+/* Settings, Leaving apps: the presses that exit an app for real, for apps that Home only pauses */
+const EXIT_PALETTE = ['Back', 'Select', 'Up', 'Down', 'Left', 'Right', 'Home'];
+
+async function saveExitSequences(changed) {
+  try {
+    applySettings(await api('/api/exit-sequences', { sequences: changed }));
+  } catch (err) {
+    toast(err.message);
+    renderExitSequences();
+  }
+}
+
+function renderExitSequences() {
+  if (!$('exit-list')) return;
+  const copy = () => JSON.parse(JSON.stringify(exitSequences));
+  $('exit-list').replaceChildren(...Object.entries(exitSequences).map(([appId, sequence]) => {
+    const box = document.createElement('div');
+    box.className = 'exit-app';
+    const head = document.createElement('div');
+    head.className = 'exit-app-head';
+    head.append(sequence.appName || appId);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'link';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => {
+      const changed = copy();
+      delete changed[appId];
+      saveExitSequences(changed);
+    });
+    head.append(remove);
+    const keys = document.createElement('ol');
+    keys.className = 'exit-keys';
+    keys.setAttribute('aria-label', `Presses that exit ${sequence.appName || 'the app'}`);
+    sequence.keys.forEach((key, index) => {
+      const item = document.createElement('li');
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.textContent = '×';
+      drop.setAttribute('aria-label', `Remove ${stepLabel(key)}`);
+      drop.addEventListener('click', () => {
+        if (sequence.keys.length === 1) { toast('An app needs at least one press. Use Remove to drop the app.'); return; }
+        const changed = copy();
+        changed[appId].keys.splice(index, 1);
+        saveExitSequences(changed);
+      });
+      item.append(stepLabel(key), drop);
+      keys.append(item);
+    });
+    const palette = document.createElement('div');
+    palette.className = 'exit-palette';
+    EXIT_PALETTE.forEach((key) => {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'key';
+      add.textContent = '+ ' + stepLabel(key);
+      add.addEventListener('click', () => {
+        if (sequence.keys.length >= 20) { toast('20 presses is the most an app can have.'); return; }
+        const changed = copy();
+        changed[appId].keys.push(key);
+        saveExitSequences(changed);
+      });
+      palette.append(add);
+    });
+    const row = document.createElement('div');
+    row.className = 'exit-row';
+    const gapLabel = document.createElement('label');
+    const gap = document.createElement('input');
+    gap.className = 'field';
+    gap.type = 'number';
+    gap.min = '0.3';
+    gap.max = '5';
+    gap.step = '0.1';
+    gap.value = String(sequence.gapMs / 1000);
+    gap.addEventListener('change', () => {
+      const seconds = parseFloat(gap.value);
+      if (!Number.isFinite(seconds)) return;
+      const changed = copy();
+      changed[appId].gapMs = Math.round(Math.min(Math.max(seconds, 0.3), 5) * 1000);
+      saveExitSequences(changed);
+    });
+    gapLabel.append('Seconds between presses ', gap);
+    const tryIt = document.createElement('button');
+    tryIt.type = 'button';
+    tryIt.className = 'key';
+    tryIt.textContent = 'Try it on this TV';
+    tryIt.addEventListener('click', async () => {
+      try {
+        await api('/api/exit-sequences/try', { ip: tv.ip, appId });
+        toast(`Sent the presses that leave ${sequence.appName || 'the app'}.`, true);
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+    row.append(gapLabel, tryIt);
+    box.append(head, keys, palette, row);
+    return box;
+  }));
+  const choices = appsList.filter((app) => !exitSequences[app.id]);
+  $('exit-add-app').replaceChildren(...choices.map((app) => new Option(app.name, app.id)));
+  $('exit-add-app').disabled = $('exit-add').disabled = !choices.length;
+}
+
+$('exit-add').addEventListener('click', () => {
+  const select = $('exit-add-app');
+  if (!select.value) return;
+  const changed = JSON.parse(JSON.stringify(exitSequences));
+  changed[select.value] = { appName: select.selectedOptions[0].textContent, keys: ['Back'], gapMs: 1000 };
+  saveExitSequences(changed);
+});
+
+$('advanced-editing').addEventListener('change', async () => {
+  try {
+    applySettings(await api('/api/settings', { advancedEditing: $('advanced-editing').checked }));
+  } catch (err) {
+    $('advanced-editing').checked = advancedEditing;
+    toast(err.message);
+  }
+});
 $('power-volume').addEventListener('change', async () => {
   const shown = $('power-volume').checked;
   document.body.classList.toggle('no-power-volume', !shown);
@@ -1983,9 +2170,24 @@ let activeCall = null;  // { id, side, pc, stream, timer, answered, offer }
 let ringTimer = null;
 
 function callScreen(mode) {
+  if (mode !== 'live') { callMini(false); callMute(false); }  // Every new call starts full screen and unmuted.
   $('call').hidden = !mode;
   $('call-ringing').hidden = mode !== 'ringing';
   $('call-live').hidden = mode !== 'live';
+}
+
+// During a call, shrink the video to a corner so the remote underneath can be used, or make it full screen again.
+function callMini(mini) {
+  $('call').classList.toggle('mini', mini);
+  $('call').setAttribute('aria-modal', String(!mini));
+  $('call-size').textContent = mini ? 'Full screen' : 'Show remote';
+}
+
+// Mute: stop sending this side's microphone. The other side still hears nothing until it's turned back on.
+function callMute(muted) {
+  activeCall?.stream?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
+  $('call-mute').setAttribute('aria-pressed', String(muted));
+  $('call-mute').textContent = muted ? 'Unmute' : 'Mute';
 }
 
 function callStatus(text) {
@@ -2058,6 +2260,8 @@ function connectMedia(stream) {
     if (pc.connectionState === 'failed') callStatus("The video couldn't connect. Hang up and try again.");
   };
   $('call-self').srcObject = stream;
+  // Mute pressed while the camera was still starting: keep the microphone off.
+  if ($('call-mute').getAttribute('aria-pressed') === 'true') stream.getAudioTracks().forEach((track) => { track.enabled = false; });
   return pc;
 }
 
@@ -2114,6 +2318,8 @@ async function checkHomeSide() {
   }
   if (view.id !== activeCall.id || view.status === 'ended' || view.status === 'none') {
     finishCall(activeCall.answered ? 'The call ended.' : `Missed call from ${$('call-who').textContent}.`);
+  } else if (view.status === 'active' && !activeCall.answered) {
+    finishCall();  // Answered on another screen here, so this one just stops ringing.
   }
 }
 
@@ -2121,6 +2327,7 @@ async function answerCall() {
   const call = activeCall;
   if (!call || call.answered) return;
   call.answered = true;
+  call.screen = Math.random().toString(36).slice(2) + Date.now().toString(36);  // Marks this screen as the one on the call
   stopRinging();
   callScreen('live');
   callStatus('Connecting…');
@@ -2130,16 +2337,16 @@ async function answerCall() {
     await call.pc.setRemoteDescription(call.offer);
     await call.pc.setLocalDescription(await call.pc.createAnswer());
     await iceGathered(call.pc);
-    await api('/api/call/answer', { id: call.id, answer: { type: 'answer', sdp: call.pc.localDescription.sdp } });
+    await api('/api/call/answer', { id: call.id, screen: call.screen, answer: { type: 'answer', sdp: call.pc.localDescription.sdp } });
   } catch (err) {
-    api('/api/call/end', { id: call.id }).catch(() => {});
+    api('/api/call/end', { id: call.id, screen: call.screen }).catch(() => {});
     finishCall();
     toast(err.message);
   }
 }
 
 function hangUp() {
-  if (activeCall?.id) api('/api/call/end', { id: activeCall.id }).catch(() => {});
+  if (activeCall?.id) api('/api/call/end', { id: activeCall.id, screen: activeCall.screen }).catch(() => {});
   finishCall();
 }
 
@@ -2147,6 +2354,8 @@ $('call-start').addEventListener('click', startCall);
 $('call-answer').addEventListener('click', answerCall);
 $('call-decline').addEventListener('click', hangUp);
 $('call-hangup').addEventListener('click', hangUp);
+$('call-size').addEventListener('click', () => callMini(!$('call').classList.contains('mini')));
+$('call-mute').addEventListener('click', () => callMute($('call-mute').getAttribute('aria-pressed') !== 'true'));
 if (!REMOTE) setInterval(checkHomeSide, 2000);  // Even when minimized, so the ring can still be heard
 
 /* Email alerts */
@@ -2244,6 +2453,8 @@ $('channels-edit').addEventListener('click', () => {
 $('add-cancel').addEventListener('click', closeEditor);
 $('add-channel').addEventListener('submit', (event) => {
   event.preventDefault();
+  // Enter in a field: without advanced editing, a pressed-button channel can only be recorded.
+  if (!advancedEditing && !$('add-channel').classList.contains('direct')) { $('draft-record').click(); return; }
   saveDraft(event.submitter?.id === 'draft-try');
 });
 $('draft-record').addEventListener('click', () => {

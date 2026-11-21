@@ -42,7 +42,7 @@ SETTINGS_FILE = STATE_FILE.with_name("settings.json")
 settings_lock = threading.Lock()
 GLOBAL_POSTS = {"/api/settings", "/api/lock", "/api/alerts", "/api/alerts/test", "/api/tvs/remove", "/api/schedules/save",
                 "/api/schedules/delete", "/api/family/connect", "/api/family/disconnect",
-                "/api/call/start", "/api/call/answer", "/api/call/end"}
+                "/api/call/start", "/api/call/answer", "/api/call/end", "/api/exit-sequences"}
 EMAIL_PATTERN = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 ALERT_REPEAT_SECONDS = 30 * 60  # One email per problem per half hour, so a bad day doesn't flood inboxes.
 VIDEO_CHECK_SECONDS = 20
@@ -52,10 +52,11 @@ EXPORT_TYPE = "tv-remote-channels"
 MAX_IMPORT = 200
 MAX_BODY = 2 * 1024 * 1024
 ECP_PORT = 8060
+HOME_SECONDS = 10      # How long to wait for the home screen after pressing Home
+APP_OPEN_SECONDS = 20  # How long to wait for an opened app to show up before opening it again
 MIN_STEP_MS = 300  # Don't replay presses faster than the app's menus can react.
 MAX_STEP_MS = 60000
 MAX_OPEN_MS = 120000
-APP_OPEN_TIMEOUT = 45  # Seconds to wait for the Roku to report an app open before giving up.
 MAX_STEPS = 300
 channels_lock = threading.Lock()
 running = {}  # ip -> threading.Event that stops the sequence playing on that device
@@ -300,6 +301,7 @@ def save_tv(info):
 def load_settings():
     settings = {
         "channelsOnly": False,
+        "advancedEditing": False,  # Edit and Copy for channel buttons. Off, a button can only be recorded again.
         "tvs": [],
         "removedTvs": [],
         "hiddenApps": {},
@@ -310,6 +312,8 @@ def load_settings():
         "schedules": [],
         "family": {},  # Family hub link: hubUrl, homeId, homeName and deviceToken
         "tvOptions": {},  # TV key -> {"powerVolume": False} for TVs that ignore power and volume
+        # App ID -> presses that exit the app for real when it's on screen (see exit_app_on_screen)
+        "exitSequences": {"195316": {"appName": "YouTube TV", "keys": ["Back", "Back", "Back", "Back", "Select"], "gapMs": 1000}},
     }
     try:
         settings.update(json.loads(SETTINGS_FILE.read_text(encoding="utf-8")))
@@ -486,10 +490,13 @@ def report_issue(key, tv_name, problem, details):
     threading.Thread(target=send, daemon=True).start()
 
 
-def set_channels_only(enabled):
+def set_view(data):
+    """The view settings: channels only, and advanced editing of channel buttons."""
     with settings_lock:
         settings = load_settings()
-        settings["channelsOnly"] = bool(enabled)
+        for name in ("channelsOnly", "advancedEditing"):
+            if name in data:
+                settings[name] = bool(data[name])
         write_settings(settings)
 
 
@@ -843,50 +850,135 @@ def reorder_channels(ip, ids):
         write_channels(channels)
 
 
-def wait_for_app(ip, app_id, cancel):
-    """Wait until the Roku reports the app open. False if stopped first, and an error if it never opens."""
-    deadline = time.monotonic() + APP_OPEN_TIMEOUT
+def current_app(ip):
+    """The ID of the app on screen ("" for the Roku home screen), or None if the TV didn't say."""
+    try:
+        body, _ = ecp(ip, "/query/active-app", timeout=3)
+        app = ET.fromstring(body).find("app")
+    except (TvError, ET.ParseError):
+        return None
+    return (app.get("id") or "") if app is not None else ""
+
+
+def wait_for_screen(ip, cancel, seconds, want_app=None, not_app=None):
+    """Wait until the TV shows want_app, or until it stops showing not_app. True if it did,
+    False if stopped first, None if the time ran out."""
+    deadline = time.monotonic() + seconds
     while True:
-        try:
-            body, _ = ecp(ip, "/query/active-app", timeout=3)
-            app = ET.fromstring(body).find("app")
-            if app is not None and app.get("id") == str(app_id):
-                return True
-        except (TvError, ET.ParseError):
-            pass  # A busy TV can miss a check, so keep trying until the deadline.
+        shown = current_app(ip)
+        if shown is not None and ((want_app is not None and shown == str(want_app))
+                                  or (not_app is not None and shown != str(not_app))):
+            return True
         if time.monotonic() >= deadline:
-            raise TvError(f"The app didn't open within {APP_OPEN_TIMEOUT} seconds.")
+            return None
         if cancel.wait(0.5):
             return False
+
+
+# Some apps only pause when Home is pressed (Roku's Instant Resume), so reopening them goes back to what
+# was playing. Each can have presses that exit it for real, set in Settings under Leaving apps.
+# YouTube TV's: Back until it asks whether to exit, then OK.
+EXIT_KEYS_ALLOWED = {"Back", "Select", "Up", "Down", "Left", "Right", "Home", "Play", "Info"}
+MAX_EXIT_KEYS = 20
+
+
+def clean_exit_sequences(data):
+    """Validate the exit sequences sent by the page: app ID -> app name, presses and the gap between them."""
+    if not isinstance(data, dict) or len(data) > 50:
+        raise TvError("Those exit presses couldn't be saved.")
+    cleaned = {}
+    for app_id, item in data.items():
+        try:
+            keys = [str(key) for key in item["keys"]]
+            gap = int(item.get("gapMs", 1000))
+        except (KeyError, TypeError, ValueError):
+            raise TvError("Those exit presses couldn't be saved.")
+        if not keys or len(keys) > MAX_EXIT_KEYS or any(key not in EXIT_KEYS_ALLOWED for key in keys):
+            raise TvError("Each app needs 1 to 20 presses, using Back, OK, the arrows, Home, Play or Options.")
+        cleaned[str(app_id)[:64]] = {"appName": str(item.get("appName", ""))[:80], "keys": keys,
+                                     "gapMs": max(300, min(gap, 5000))}
+    return cleaned
+
+
+def save_exit_sequences(data):
+    sequences = clean_exit_sequences(data)
+    with settings_lock:
+        settings = load_settings()
+        settings["exitSequences"] = sequences
+        write_settings(settings)
+
+
+def run_exit_keys(ip, sequence, cancel):
+    """Send one app's exit presses with their gap. False if stopped first."""
+    for key in sequence["keys"]:
+        press(ip, key)
+        if cancel.wait(sequence["gapMs"] / 1000):
+            return False
+    return True
+
+
+def exit_app_on_screen(ip, cancel):
+    """If an app with exit presses is on screen, exit it with them. False if stopped first."""
+    sequence = load_settings()["exitSequences"].get(current_app(ip) or "")
+    if not sequence:
+        return True
+    return run_exit_keys(ip, sequence, cancel) and not cancel.wait(1)
+
+
+def try_exit_sequence(ip, app_id):
+    """Settings' Try it: send an app's exit presses now, whatever is on screen."""
+    sequence = load_settings()["exitSequences"].get(str(app_id))
+    if not sequence:
+        raise TvError("That app has no exit presses.")
+    cancel = start_sequence(ip)
+    try:
+        run_exit_keys(ip, sequence, cancel)
+    finally:
+        finish_sequence(ip, cancel)
 
 
 def open_app_fresh(ip, app_id, cancel, reset=False, wait_ms=0, link=""):
-    """Go home first, so recording and playback both start from the same place.
+    """Go home, wait for the home screen, open the app and wait until it's open.
 
-    Returns once the Roku reports the app open, so the wait for its menus counts
-    from then, however slowly it started. Apps resume where they were left. With
-    reset on, a placeholder link makes an app like Frndly go to its home screen
-    and show a "not available" pop-up. OK clears the pop-up, and Up (which stops
-    at the top) puts the highlight on the app's top menu, wherever it landed.
+    Returns the seconds since the app was opened, or None if stopped. Like a person
+    with the remote, it waits for the home screen before opening the app: sent while
+    the Roku is still leaving a playing app, the open command can be ignored. With
+    reset on, a placeholder link makes an app like Frndly go to its home screen and
+    show a "not available" pop-up. OK clears the pop-up, and Up (which stops at the
+    top) puts the highlight on the app's top menu, wherever it landed.
     """
+    if not exit_app_on_screen(ip, cancel):
+        return None
     press(ip, "Home")
-    if cancel.wait(1.5):
-        return False
+    if wait_for_screen(ip, cancel, HOME_SECONDS, not_app=app_id) is False or cancel.wait(2):
+        return None
     path = "/launch/" + urllib.parse.quote(str(app_id), safe="")
+    if reset:
+        path += "?contentId=reset&mediaType=live"
+    elif link:
+        path += f"?{link}"  # A direct link goes straight to the channel.
+    for _ in range(2):
+        launched = time.monotonic()
+        ecp(ip, path, "POST")
+        opened = wait_for_screen(ip, cancel, APP_OPEN_SECONDS, want_app=app_id)
+        if opened is False:
+            return None
+        if opened:
+            break
+    else:
+        raise TvError("The app didn't open, so no presses were sent.")
     if not reset:
-        ecp(ip, path + (f"?{link}" if link else ""), "POST")  # A direct link goes straight to the channel.
-        return wait_for_app(ip, app_id, cancel)
-    ecp(ip, path + "?contentId=reset&mediaType=live", "POST")
-    if not wait_for_app(ip, app_id, cancel) or cancel.wait(wait_ms / 1000):
-        return False
+        return time.monotonic() - launched
+    if cancel.wait(max(0, wait_ms / 1000 - (time.monotonic() - launched))):
+        return None
     press(ip, "Select")
     if cancel.wait(1):
-        return False
+        return None
     for _ in range(4):
         press(ip, "Up")
         if cancel.wait(0.5):
-            return False
-    return True
+            return None
+    return 0.0  # The recorded presses count from here, after the reset.
 
 
 def start_sequence(ip):
@@ -971,10 +1063,11 @@ def video_playing(ip, cancel):
 def run_channel(ip, channel, cancel):
     link = urllib.parse.urlencode({"contentId": channel["contentId"], "mediaType": channel.get("mediaType", "live")})         if channel.get("contentId") else ""
     reset = channel.get("resetFirst", False) and not link
-    if not open_app_fresh(ip, channel["appId"], cancel, reset, channel.get("openDelayMs", 0), link):
+    since_open = open_app_fresh(ip, channel["appId"], cancel, reset, channel.get("openDelayMs", 0), link)
+    if since_open is None:
         return {"stopped": True}
-    # Channels saved before this setting existed keep their app wait in the first step's delay.
-    if not reset and channel["steps"] and cancel.wait(channel.get("openDelayMs", 0) / 1000):
+    # The navigation starts the recorded time after the app was opened.
+    if not reset and channel["steps"] and cancel.wait(max(0, channel.get("openDelayMs", 0) / 1000 - since_open)):
         return {"stopped": True}
     for step in channel["steps"]:
         if cancel.wait(max(step["delayMs"], MIN_STEP_MS) / 1000):
@@ -1432,19 +1525,23 @@ def start_call(caller, offer):
         return {"id": call["id"]}
 
 
-def answer_call(call_id, answer):
+def answer_call(call_id, answer, screen):
     answer = clean_sdp(answer, "answer")
     with call_lock:
         if call.get("id") != call_id or call.get("status") != "ringing":
             raise TvError("That call has ended.")
-        call.update(status="active", answer=answer, offer=None)
+        # Every TV Remote screen at the home rings. The one that answered is the only one here that can hang up.
+        call.update(status="active", answer=answer, offer=None, screen=str(screen or "")[:64])
 
 
-def end_call(call_id, side):
+def end_call(call_id, side, screen=None):
     with call_lock:
-        if call.get("id") == call_id and call["status"] != "ended":
-            finish_call("Declined" if side == "home" and call["status"] == "ringing" else
-                        "Cancelled" if call["status"] == "ringing" else "Hung up")
+        if call.get("id") != call_id or call["status"] == "ended":
+            return
+        if side == "home" and call["status"] == "active" and call.get("screen") and str(screen or "") != call["screen"]:
+            return  # Another screen at the home, not the one on the call
+        finish_call("Declined" if side == "home" and call["status"] == "ringing" else
+                    "Cancelled" if call["status"] == "ringing" else "Hung up")
 
 
 def tv_name_for(ip):
@@ -1472,6 +1569,7 @@ def describe_action(path, data):
         "/api/settings": "Changed the view", "/api/apps/hidden": "Changed which apps show", "/api/tvs/remove": "Removed a TV",
         "/api/tv-options": f"Changed whether power and volume show{on}",
         "/api/call/start": "Started a video call", "/api/call/end": "Ended a video call",
+        "/api/exit-sequences": "Changed how apps are left", "/api/exit-sequences/try": f"Tried leaving an app{on}",
         "/api/lock": "Changed the lock", "/api/alerts": "Changed email alerts", "/api/alerts/test": "Sent a test alert email",
     }.get(path)
 
@@ -1589,7 +1687,7 @@ class Handler(BaseHTTPRequestHandler):
         """Settings that aren't tied to one TV."""
         try:
             if self.path == "/api/settings":
-                set_channels_only(data["channelsOnly"])
+                set_view(data)
             elif self.path == "/api/lock":
                 lock_action(data.get("action"), data.get("pin"), remote_owner=bool(self.relay and self.relay[0] == "owner"))
             elif self.path == "/api/alerts":
@@ -1600,16 +1698,18 @@ class Handler(BaseHTTPRequestHandler):
                     raise TvError("That TV isn't in the list.")
                 remove_tv(key)
                 return self.send_json({**public_settings(), "saved": load_saved()})
+            elif self.path == "/api/exit-sequences":
+                save_exit_sequences(data.get("sequences"))
             elif self.path == "/api/call/start":
                 if not self.relay:
                     raise TvError("Calls are started by family members through the family hub.")
                 return self.send_json(start_call(self.relay[1], data.get("offer")))
             elif self.path == "/api/call/answer":
                 # Only someone at the home can answer: the shared rules never let this come through the hub.
-                answer_call(str(data.get("id")), data.get("answer"))
+                answer_call(str(data.get("id")), data.get("answer"), data.get("screen"))
                 return self.send_json({"ok": True})
             elif self.path == "/api/call/end":
-                end_call(str(data.get("id")), "caller" if self.relay else "home")
+                end_call(str(data.get("id")), "caller" if self.relay else "home", data.get("screen"))
                 return self.send_json({"ok": True})
             elif self.path == "/api/family/connect":
                 family_connect(data.get("hubUrl"))
@@ -1681,7 +1781,7 @@ class Handler(BaseHTTPRequestHandler):
                 cancel = start_sequence(check_ip(ip))
                 try:
                     wait_ms = max(0, min(int(data.get("openDelayMs") or 0), MAX_OPEN_MS))
-                    self.send_json({"opened": open_app_fresh(ip, data.get("id", ""), cancel, bool(data.get("resetFirst")), wait_ms)})
+                    self.send_json({"opened": open_app_fresh(ip, data.get("id", ""), cancel, bool(data.get("resetFirst")), wait_ms) is not None})
                 finally:
                     finish_sequence(ip, cancel)
             elif self.path == "/api/channels/save":
@@ -1704,6 +1804,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(play_channel(ip, data.get("id")))
             elif self.path == "/api/start-over":
                 start_over(ip)
+                self.send_json({"ok": True})
+            elif self.path == "/api/exit-sequences/try":
+                try_exit_sequence(check_ip(ip), data.get("appId"))
                 self.send_json({"ok": True})
             elif self.path == "/api/channels/stop":
                 stop_sequence(ip)
